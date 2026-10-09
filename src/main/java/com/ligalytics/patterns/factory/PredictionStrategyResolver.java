@@ -7,6 +7,9 @@ import org.springframework.stereotype.Component;
 import com.ligalytics.ai.MatchDatasetConverter;
 import com.ligalytics.ai.PredictionTarget;
 import com.ligalytics.ai.WekaModelManager;
+import com.ligalytics.external.FootballChartsClient;
+import com.ligalytics.patterns.builder.MatchAnalysis;
+import com.ligalytics.patterns.strategy.FootballChartsStrategy;
 import com.ligalytics.patterns.strategy.PoissonStrategy;
 import com.ligalytics.patterns.strategy.PredictionStrategy;
 import com.ligalytics.patterns.strategy.Predictor;
@@ -30,10 +33,22 @@ public class PredictionStrategyResolver {
 
     private final WekaModelManager modelManager;
     private final MatchDatasetConverter datasetConverter;
+    private final FootballChartsClient footballCharts;
 
-    public PredictionStrategyResolver(WekaModelManager modelManager, MatchDatasetConverter datasetConverter) {
+    public PredictionStrategyResolver(WekaModelManager modelManager, MatchDatasetConverter datasetConverter,
+            FootballChartsClient footballCharts) {
         this.modelManager = modelManager;
         this.datasetConverter = datasetConverter;
+        this.footballCharts = footballCharts;
+    }
+
+    /**
+     * Estrategia del modelo externo para el ganador de este partido, si está configurado
+     * y tiene sus probabilidades; vacío si no (se usa entonces el modelo propio).
+     */
+    public Optional<PredictionStrategy> resolveExternalResultStrategy(MatchAnalysis analysis) {
+        return footballCharts.winnerOdds(analysis.getHomeTeam(), analysis.getAwayTeam())
+                .map(FootballChartsStrategy::new);
     }
 
     /**
