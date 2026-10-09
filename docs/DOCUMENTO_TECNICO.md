@@ -536,8 +536,10 @@ inicial de la propuesta ("no es una herramienta de apuestas") por "simulador edu
 **100 000 COP ficticios** (`/api/betting/wallet/reset` los restablece). Sin verificación de correo ni recuperación.
 
 **Cuotas** (`betting/`). `BzzoiroOddsProvider` obtiene el consenso de ~14 casas (1X2, más/menos, ambos marcan,
-córneres) con caché de 30 min. No existe fuente gratuita verificada de cuotas de tarjetas: `MarketModel.demoCardOdds`
-genera cuotas "demo" (margen 7 %) etiquetadas como tales.
+córneres) con caché de 30 min. Las cuotas de **tarjetas** vienen de Pinnacle vía The Odds API
+(`TheOddsApiCardsProvider`, mercado `alternate_totals_cards`, solo líneas .5): cuesta 1 crédito por partido, así que solo
+se consultan partidos a menos de 48 h (cuando se publican), con caché de 12 h y parada si quedan menos de 25 créditos.
+Cuando no hay cuota real, `MarketModel.demoCardOdds` genera cuotas "demo" (margen 7 %) etiquetadas como tales.
 
 **Probabilidades del modelo** (`MarketModel`): ganador de la predicción (Football Charts o modelo propio); goles y ambos
 marcan de `ScoreDistribution`; córneres y tarjetas con aproximación normal sobre el total esperado (σ = 3,4 y 2,5).

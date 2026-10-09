@@ -21,6 +21,7 @@ DB_USERNAME=postgres
 DB_PASSWORD=tu_contraseña
 FOOTBALL_DATA_ORG_KEY=...   # calendario y resultados en vivo (football-data.org, gratis)
 BZZOIRO_API_KEY=...         # xG por partido (sports.bzzoiro.com, gratis)
+ODDS_API_KEY=...            # cuotas reales de tarjetas (the-odds-api.com, gratis, 500 créditos/mes)
 FOOTBALL_CHARTS_API_KEY=... # probabilidades de ganador (football-charts.com, gratis); sin clave se usa el modelo propio
 ADMIN_API_KEY=...           # opcional: protege /api/admin/**
 ```
@@ -42,8 +43,9 @@ Simulador **educativo**: no hay dinero real, pagos ni enlaces a casas de apuesta
 recibe **100.000 COP ficticios**; con sesión (`Authorization: Bearer <token>`) se consultan cuotas y recomendaciones
 (`/api/betting/matches`, `/recommendations`), se apuesta (`POST /api/betting/bets`) y se ve el saldo (`/wallet`).
 - Mercados: ganador, goles (más/menos), ambos marcan, córneres y tarjetas. Las cuotas reales son el consenso de ~14 casas
-  vía Bzzoiro (`BZZOIRO_API_KEY`); **no hay fuente gratuita de cuotas de tarjetas**, así que esas son "demo" calculadas
-  por el modelo con margen y marcadas como tales.
+  vía Bzzoiro (`BZZOIRO_API_KEY`). Las **tarjetas** vienen de Pinnacle vía The Odds API (`ODDS_API_KEY`, 500 créditos/mes
+  gratis; solo líneas .5 y solo partidos a menos de 48 h, cuando Pinnacle las publica). Si no hay cuota real, la cuota
+  de tarjetas es "demo": calculada por el modelo con margen y marcada como tal.
 - La cuota la fija el servidor; las apuestas se liquidan solas al terminar el partido (tarea cada 30 min).
 - Las recomendaciones (ventaja = probabilidad del modelo × cuota − 1, ancladas al mercado) **no están demostradas**:
   según la validación, el modelo apenas supera al trivial en goles, córneres y tarjetas.
