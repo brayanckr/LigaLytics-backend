@@ -37,6 +37,19 @@ API en <http://localhost:8080/api> · Swagger en <http://localhost:8080/api/swag
 `/api/teams` · `/api/teams/{id}/stats` · `/api/ranking` · `/api/seasons` · `/api/predict` · `/api/predict/history` ·
 `/api/model/report` · `/api/fixtures` · `/api/fixtures/live` · `/api/admin/**`
 
+## Apuestas (demo con dinero ficticio)
+Simulador **educativo**: no hay dinero real, pagos ni enlaces a casas de apuestas. Cada cuenta (`/api/auth/register`)
+recibe **100.000 COP ficticios**; con sesión (`Authorization: Bearer <token>`) se consultan cuotas y recomendaciones
+(`/api/betting/matches`, `/recommendations`), se apuesta (`POST /api/betting/bets`) y se ve el saldo (`/wallet`).
+- Mercados: ganador, goles (más/menos), ambos marcan, córneres y tarjetas. Las cuotas reales son el consenso de ~14 casas
+  vía Bzzoiro (`BZZOIRO_API_KEY`); **no hay fuente gratuita de cuotas de tarjetas**, así que esas son "demo" calculadas
+  por el modelo con margen y marcadas como tales.
+- La cuota la fija el servidor; las apuestas se liquidan solas al terminar el partido (tarea cada 30 min).
+- Las recomendaciones (ventaja = probabilidad del modelo × cuota − 1, ancladas al mercado) **no están demostradas**:
+  según la validación, el modelo apenas supera al trivial en goles, córneres y tarjetas.
+- Contraseñas con PBKDF2 y tokens guardados solo como hash. Sin verificación de correo ni recuperación de contraseña:
+  no reutilices contraseñas reales.
+
 ## Pruebas
 ```powershell
 .\mvnw.cmd test      # usa H2 en memoria, no necesita PostgreSQL

@@ -522,3 +522,30 @@ promedian. `ScoreDistribution` reparte `T` entre local y visitante de modo que l
 `P(local) − P(visitante)` igual al del ganador previsto. De esa matriz salen los goles esperados de cada equipo, el marcador
 más probable entre los que cumplen el ganador, el top 5 de marcadores, P(más de 2,5) y P(ambos marcan), todo coherente.
 El endpoint `GET /api/teams/h2h?homeId=&awayId=` devuelve los últimos enfrentamientos con un resumen.
+
+---
+
+## 9. Módulo de apuestas (demo con dinero ficticio)
+
+**Alcance.** Simulador educativo: no hay dinero real, pagos ni conexión con casas de apuestas. Sustituye la nota
+inicial de la propuesta ("no es una herramienta de apuestas") por "simulador educativo con dinero ficticio".
+
+**Cuentas** (`auth/`). `POST /api/auth/register|login|logout`, `GET /api/auth/me`. Contraseñas con PBKDF2-HMAC-SHA256
+(210 000 iteraciones, sal aleatoria); el token de sesión es opaco, caduca a los 7 días y solo se guarda su hash SHA-256.
+`AuthInterceptor` protege `/api/betting/**`. Bloqueo de 5 min tras 5 intentos fallidos. Cada cuenta nueva recibe
+**100 000 COP ficticios** (`/api/betting/wallet/reset` los restablece). Sin verificación de correo ni recuperación.
+
+**Cuotas** (`betting/`). `BzzoiroOddsProvider` obtiene el consenso de ~14 casas (1X2, más/menos, ambos marcan,
+córneres) con caché de 30 min. No existe fuente gratuita verificada de cuotas de tarjetas: `MarketModel.demoCardOdds`
+genera cuotas "demo" (margen 7 %) etiquetadas como tales.
+
+**Probabilidades del modelo** (`MarketModel`): ganador de la predicción (Football Charts o modelo propio); goles y ambos
+marcan de `ScoreDistribution`; córneres y tarjetas con aproximación normal sobre el total esperado (σ = 3,4 y 2,5).
+
+**Recomendaciones.** `ventaja = p × cuota − 1`. Como el modelo no está demostrado frente al mercado, la probabilidad se
+ancla a la del mercado sin margen y se descartan ventajas fuera de 3–25 %, discrepancias modelo/mercado > 15 puntos,
+p < 30 % y cuotas demo. Importe sugerido: ¼ de Kelly con tope del 5 % del saldo.
+
+**Apuestas.** La cuota la fija el servidor, el partido no debe haber empezado y el importe debe caber en el saldo
+(bloqueo pesimista de la fila del usuario). `BetSettlementObserver` (Observer) y una tarea cada 30 min liquidan
+ganador, goles, ambos marcan, córneres y tarjetas; sin datos suficientes la apuesta queda pendiente.
