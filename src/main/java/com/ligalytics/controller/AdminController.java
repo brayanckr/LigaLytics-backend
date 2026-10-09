@@ -53,15 +53,18 @@ public class AdminController {
     private final LigaLyticsFacade facade;
     private final DataSeederService dataSeederService;
     private final WekaTrainingService trainingService;
+    private final com.ligalytics.etl.CurrentSeasonSync currentSeasonSync;
     private final String adminApiKey;
 
     public AdminController(LigaLyticsFacade facade,
             DataSeederService dataSeederService,
             WekaTrainingService trainingService,
+            com.ligalytics.etl.CurrentSeasonSync currentSeasonSync,
             @Value("${ligalytics.admin.api-key:}") String adminApiKey) {
         this.facade = facade;
         this.dataSeederService = dataSeederService;
         this.trainingService = trainingService;
+        this.currentSeasonSync = currentSeasonSync;
         this.adminApiKey = adminApiKey == null ? "" : adminApiKey;
     }
 
@@ -224,6 +227,18 @@ public class AdminController {
             @RequestParam(name = "seasons", required = false) List<Integer> seasons) {
         requireAdminKey(apiKey);
         return facade.refreshBzzoiroXg(seasons == null || seasons.isEmpty() ? List.of(2021, 2022, 2023, 2024, 2025) : seasons);
+    }
+
+    @PostMapping("/etl/current-season")
+    @Operation(summary = "Actualiza la temporada en curso",
+            description = "Guarda los partidos ya finalizados de la temporada actual (football-data.org). "
+                    + "Se ejecuta tambien automaticamente cada 6 horas. Requiere FOOTBALL_DATA_ORG_KEY.")
+    @ApiResponse(responseCode = "200", description = "Resumen de la sincronizacion")
+    @ApiResponse(responseCode = "401", description = "Clave de administración incorrecta")
+    public com.ligalytics.etl.dto.EtlSummary syncCurrentSeason(
+            @RequestHeader(name = "X-Admin-Key", required = false) String apiKey) {
+        requireAdminKey(apiKey);
+        return currentSeasonSync.sync();
     }
 
     @PostMapping("/etl/transfermarkt")
