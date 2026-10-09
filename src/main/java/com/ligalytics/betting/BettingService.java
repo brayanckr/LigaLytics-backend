@@ -71,6 +71,7 @@ public class BettingService {
     private static final Logger log = LoggerFactory.getLogger(BettingService.class);
 
     private final BzzoiroOddsProvider oddsProvider;
+    private final TheOddsApiCardsProvider cardsProvider;
     private final BzzoiroClient bzzoiro;
     private final TeamRepository teamRepository;
     private final MatchRepository matchRepository;
@@ -78,9 +79,11 @@ public class BettingService {
     private final UserRepository users;
     private final BetRepository bets;
 
-    public BettingService(BzzoiroOddsProvider oddsProvider, BzzoiroClient bzzoiro, TeamRepository teamRepository,
-            MatchRepository matchRepository, LigaLyticsFacade facade, UserRepository users, BetRepository bets) {
+    public BettingService(BzzoiroOddsProvider oddsProvider, TheOddsApiCardsProvider cardsProvider, BzzoiroClient bzzoiro,
+            TeamRepository teamRepository, MatchRepository matchRepository, LigaLyticsFacade facade, UserRepository users,
+            BetRepository bets) {
         this.oddsProvider = oddsProvider;
+        this.cardsProvider = cardsProvider;
         this.bzzoiro = bzzoiro;
         this.teamRepository = teamRepository;
         this.matchRepository = matchRepository;
@@ -124,7 +127,7 @@ public class BettingService {
 
     /** Ventaja moderada, sobre una cuota real, sin gran discrepancia entre el modelo y el mercado. */
     public static boolean isRecommendable(Offer offer) {
-        return offer.edge() != null && offer.marketProbability() != null && "consenso".equals(offer.line().source())
+        return offer.edge() != null && offer.marketProbability() != null && offer.line().isReal()
                 && offer.edge() >= MIN_EDGE && offer.edge() <= MAX_EDGE
                 && Math.abs(offer.modelProbability() - offer.marketProbability()) <= MAX_DISCREPANCY
                 && offer.adjustedProbability() >= MIN_PROBABILITY;
@@ -288,7 +291,7 @@ public class BettingService {
      * y linea (1X2 completo, o el par mas/menos). Nula si el grupo esta incompleto.
      */
     static Double noVigProbability(OddsLine target, List<OddsLine> lines) {
-        List<OddsLine> group = lines.stream().filter(l -> l.market() == target.market() && "consenso".equals(l.source())
+        List<OddsLine> group = lines.stream().filter(l -> l.market() == target.market() && l.isReal()
                 && java.util.Objects.equals(l.line(), target.line())).toList();
         int expected = target.market() == Market.WINNER ? 3 : 2;
         if (group.size() != expected) {
@@ -315,14 +318,17 @@ public class BettingService {
         }
 
         List<OddsLine> lines = new ArrayList<>(oddsProvider.odds(event.id()));
-        if (model != null) {
+        List<OddsLine> realCards = cardsProvider.cardOdds(event.homeTeam(), event.awayTeam(), event.kickoff());
+        if (!realCards.isEmpty()) {
+            lines.addAll(realCards);
+        } else if (model != null) {
             lines.addAll(model.demoCardOdds());
         }
         List<Offer> offers = new ArrayList<>();
         for (OddsLine line : lines) {
             Double probability = model == null ? null
                     : model.probability(line.market(), line.selection(), line.line()).orElse(null);
-            Double market = "consenso".equals(line.source()) ? noVigProbability(line, lines) : null;
+            Double market = line.isReal() ? noVigProbability(line, lines) : null;
             Double adjusted = probability == null ? null : market == null ? probability : 0.5 * probability + 0.5 * market;
             Double edge = adjusted == null ? null : round4(adjusted * line.odds() - 1.0);
             offers.add(new Offer(line, probability == null ? null : round4(probability), market == null ? null : round4(market),

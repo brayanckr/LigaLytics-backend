@@ -119,6 +119,24 @@ class BettingUnitTest {
     }
 
     @Test
+    void parsesPinnacleCardOddsKeepingOnlyHalfLines() throws Exception {
+        String json = """
+                {"bookmakers":[{"key":"pinnacle","markets":[{"key":"alternate_totals_cards","outcomes":[
+                  {"name":"Over","price":1.8,"point":4.5},{"name":"Under","price":2.01,"point":4.5},
+                  {"name":"Over","price":1.47,"point":4.0},{"name":"Under","price":2.61,"point":4.0},
+                  {"name":"Over","price":2.5,"point":5.5},{"name":"Under","price":1.49,"point":5.5}]},
+                  {"key":"alternate_totals_corners","outcomes":[{"name":"Over","price":1.67,"point":9.5}]}]}]}
+                """;
+
+        List<OddsLine> lines = TheOddsApiCardsProvider.parse(new ObjectMapper().readTree(json));
+
+        assertEquals(4, lines.size());
+        assertTrue(lines.stream().allMatch(l -> l.market() == Market.CARDS && l.isReal() && "pinnacle".equals(l.source())));
+        assertTrue(lines.stream().anyMatch(l -> l.sameAs(Market.CARDS, "UNDER", 4.5) && l.odds() == 2.01));
+        assertTrue(lines.stream().noneMatch(l -> l.line() == 4.0));
+    }
+
+    @Test
     void parsesRealOddsRowsAndIgnoresUnsupportedMarkets() throws Exception {
         String json = """
                 [{"market":"1x2","outcome":"HOME","line":null,"decimal_odds":1.335},
