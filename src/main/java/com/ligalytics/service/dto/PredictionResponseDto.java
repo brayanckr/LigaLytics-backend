@@ -35,6 +35,11 @@ public record PredictionResponseDto(
         @Schema(description = "Algoritmo usado por cada predictor", example = "{\"resultado\":\"weka-logistic\"}")
         Map<String, String> strategies,
         @Schema(description = "Temporada de la que proceden los datos usados", example = "2023/2024") String dataSeason,
+        @Schema(description = "Origen del ganador: football-charts (modelo externo) o modelo-propio", example = "football-charts")
+        String winnerSource,
+        @Schema(description = "Probabilidad de victoria local según el modelo propio") double ownHomeWinProbability,
+        @Schema(description = "Probabilidad de empate según el modelo propio") double ownDrawProbability,
+        @Schema(description = "Probabilidad de victoria visitante según el modelo propio") double ownAwayWinProbability,
         @Schema(description = "Indica si la predicción se sirvió desde caché") boolean fromCache,
         Instant generatedAt
 ) {
@@ -44,6 +49,7 @@ public record PredictionResponseDto(
                 homeWinProbability, drawProbability, awayWinProbability, expectedHomeGoals, expectedAwayGoals,
                 goalsOutcome, mostLikelyScore, expectedCorners, cornersOutcome, expectedCards, cardsOutcome,
                 expectedHomeYellowCards, expectedAwayYellowCards, expectedHomeRedCards, expectedAwayRedCards,
-                strategies, dataSeason, true, generatedAt);
+                strategies, dataSeason, winnerSource, ownHomeWinProbability, ownDrawProbability,
+                ownAwayWinProbability, true, generatedAt);
     }
 }

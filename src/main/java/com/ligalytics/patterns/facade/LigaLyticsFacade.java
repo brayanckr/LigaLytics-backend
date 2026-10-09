@@ -183,12 +183,19 @@ public class LigaLyticsFacade {
 
         MatchAnalysis analysis = buildAnalysis(home, away);
 
-        PredictionStrategy resultStrategy = strategyResolver.resolveStrategy(PredictorType.RESULTADO);
+        PredictionStrategy ownResultStrategy = strategyResolver.resolveStrategy(PredictorType.RESULTADO);
+        // Ganador: modelo externo (Football Charts) si tiene el partido; si no, el modelo propio.
+        PredictionStrategy resultStrategy = strategyResolver.resolveExternalResultStrategy(analysis)
+                .orElse(ownResultStrategy);
+        boolean external = resultStrategy != ownResultStrategy;
         PredictionStrategy goalsStrategy = strategyResolver.resolveStrategy(PredictorType.GOLES);
         PredictionStrategy cornersStrategy = strategyResolver.resolveStrategy(PredictorType.CORNERES);
         PredictionStrategy cardsStrategy = strategyResolver.resolveStrategy(PredictorType.TARJETAS);
 
         Prediction result = strategyResolver.predictorFor(PredictorType.RESULTADO, resultStrategy).predict(analysis);
+        Prediction ownResult = external
+                ? strategyResolver.predictorFor(PredictorType.RESULTADO, ownResultStrategy).predict(analysis)
+                : result;
         Prediction goals = strategyResolver.predictorFor(PredictorType.GOLES, goalsStrategy).predict(analysis);
         Prediction corners = strategyResolver.predictorFor(PredictorType.CORNERES, cornersStrategy).predict(analysis);
         Prediction cards = strategyResolver.predictorFor(PredictorType.TARJETAS, cardsStrategy).predict(analysis);
@@ -196,6 +203,9 @@ public class LigaLyticsFacade {
         double homeProbability = result.homeValue();
         double awayProbability = result.awayValue();
         double drawProbability = Math.max(0.0, 1.0 - homeProbability - awayProbability);
+        double ownHome = ownResult.homeValue();
+        double ownAway = ownResult.awayValue();
+        double ownDraw = Math.max(0.0, 1.0 - ownHome - ownAway);
 
         CardsBreakdown cardsBreakdown = CardsBreakdown.of(cards, analysis);
         Map<String, String> strategies = new LinkedHashMap<>();
@@ -214,6 +224,7 @@ public class LigaLyticsFacade {
                 cardsBreakdown.homeYellow(), cardsBreakdown.awayYellow(),
                 cardsBreakdown.homeRed(), cardsBreakdown.awayRed(),
                 strategies, analysis.getSeason(),
+                external ? resultStrategy.name() : "modelo-propio", ownHome, ownDraw, ownAway,
                 false, java.time.Instant.now());
 
         predictionCache.put(cacheKey, response);

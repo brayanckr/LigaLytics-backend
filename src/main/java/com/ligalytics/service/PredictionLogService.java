@@ -45,6 +45,10 @@ public class PredictionLogService {
                     .expectedAwayGoals(prediction.expectedAwayGoals())
                     .expectedCorners(prediction.expectedCorners())
                     .expectedCards(prediction.expectedCards())
+                    .winnerSource(prediction.winnerSource())
+                    .ownHomeWin(prediction.ownHomeWinProbability())
+                    .ownDraw(prediction.ownDrawProbability())
+                    .ownAwayWin(prediction.ownAwayWinProbability())
                     .build());
         } catch (RuntimeException ex) {
             log.warn("No se pudo guardar la predicción {} vs {}: {}", prediction.homeTeam(), prediction.awayTeam(),

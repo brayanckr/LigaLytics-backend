@@ -69,4 +69,17 @@ public class PredictionRecord {
 
     @Column(name = "expected_cards")
     private Double expectedCards;
+
+    /** Origen del ganador (football-charts o modelo-propio) y probabilidades del modelo propio, para medir despues cual acierta mas. */
+    @Column(name = "winner_source", length = 30)
+    private String winnerSource;
+
+    @Column(name = "own_home_win")
+    private Double ownHomeWin;
+
+    @Column(name = "own_draw")
+    private Double ownDraw;
+
+    @Column(name = "own_away_win")
+    private Double ownAwayWin;
 }
