@@ -46,6 +46,11 @@ recibe **100.000 COP ficticios**; con sesión (`Authorization: Bearer <token>`) 
   vía Bzzoiro (`BZZOIRO_API_KEY`). Las **tarjetas** vienen de Pinnacle vía The Odds API (`ODDS_API_KEY`, 500 créditos/mes
   gratis; solo líneas .5 y solo partidos a menos de 48 h, cuando Pinnacle las publica). Si no hay cuota real, la cuota
   de tarjetas es "demo": calculada por el modelo con margen y marcada como tal.
+- Vista tipo casa de apuestas: `GET /api/betting/matches` (partidos con 1 X 2) y `GET /api/betting/matches/{eventId}`
+  (todos los mercados del partido).
+- **Combinadas (parlay):** `POST /api/betting/parlays` con 2 a 8 selecciones de partidos distintos; la cuota total es el
+  producto de las cuotas (máx. 1000) y se gana solo si aciertan todas. Una selección anulada cuenta con cuota 1 y una
+  perdida pierde la combinada aunque otras sigan pendientes. `GET /api/betting/parlays` lista el historial.
 - La cuota la fija el servidor; las apuestas se liquidan solas al terminar el partido (tarea cada 30 min).
 - Las recomendaciones (ventaja = probabilidad del modelo × cuota − 1, ancladas al mercado) **no están demostradas**:
   según la validación, el modelo apenas supera al trivial en goles, córneres y tarjetas.

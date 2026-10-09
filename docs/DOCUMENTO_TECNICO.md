@@ -551,3 +551,10 @@ p < 30 % y cuotas demo. Importe sugerido: ¼ de Kelly con tope del 5 % del saldo
 **Apuestas.** La cuota la fija el servidor, el partido no debe haber empezado y el importe debe caber en el saldo
 (bloqueo pesimista de la fila del usuario). `BetSettlementObserver` (Observer) y una tarea cada 30 min liquidan
 ganador, goles, ambos marcan, córneres y tarjetas; sin datos suficientes la apuesta queda pendiente.
+
+**Combinadas (parlay).** Las entidades `Parlay` y `ParlayLeg` guardan una combinada de 2 a 8 selecciones de partidos
+distintos (dos selecciones del mismo partido están correlacionadas y se rechazan). El servidor recalcula cada cuota, la
+cuota total es su producto redondeado a dos decimales con tope 1000, y el importe se descuenta del saldo con bloqueo
+pesimista de la fila del usuario. `ParlaySettlement.resolve` aplica las reglas: una selección perdida pierde la
+combinada aunque otras sigan pendientes; con todas resueltas, las anuladas cuentan con cuota 1 y, si todas se anulan,
+se devuelve el importe. La liquidación comparte con las apuestas simples la lógica de resultados del partido.
