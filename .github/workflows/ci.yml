@@ -1,0 +1,55 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-ci:
+    name: Backend CI (Java 17 + Maven)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Make mvnw executable
+        run: chmod +x mvnw
+
+      - name: Run tests
+        run: ./mvnw -B clean test
+
+  # Despliegue automatico en cada push a main, solo si las pruebas pasan.
+  # Requiere los secretos RAILWAY_TOKEN y RAILWAY_SERVICE; si faltan, se omite con un aviso.
+  deploy-backend:
+    name: Deploy backend (Railway)
+    needs: [ backend-ci ]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVICE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to Railway
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ] || [ -z "$RAILWAY_SERVICE" ]; then
+            echo "::warning::RAILWAY_TOKEN / RAILWAY_SERVICE no configurados: se omite el despliegue."
+            exit 0
+          fi
+          npm install -g @railway/cli
+          railway up --service "$RAILWAY_SERVICE" --ci
