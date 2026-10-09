@@ -21,6 +21,8 @@ public record MatchSummaryDto(
         Integer yellowCards,
         Integer redCards,
         @Schema(description = "Descripción del partido enriquecida por los decoradores (xG, valor de plantilla)")
-        String description
+        String description,
+        @Schema(description = "Temporada del partido", example = "2026/2027")
+        String season
 ) {
 }

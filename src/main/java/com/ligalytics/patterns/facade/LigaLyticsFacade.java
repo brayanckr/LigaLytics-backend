@@ -149,7 +149,11 @@ public class LigaLyticsFacade {
                 .sorted(Comparator.comparing(Match::getMatchDate,
                         Comparator.nullsLast(Comparator.naturalOrder())).reversed())
                 .toList();
-        List<MatchSummaryDto> recentMatches = newestFirst.stream()
+        // Ultimos partidos del equipo en cualquier temporada (incluida la actual), del mas reciente al mas antiguo.
+        List<MatchSummaryDto> recentMatches = allMatches.stream()
+                .filter(match -> match.getMatchDate() != null && match.getFullTimeHomeGoals() != null
+                        && match.getFullTimeAwayGoals() != null)
+                .sorted(Comparator.comparing(Match::getMatchDate).reversed())
                 .limit(RECENT_MATCHES)
                 .map(this::toMatchSummary)
                 .toList();
@@ -574,7 +578,8 @@ public class LigaLyticsFacade {
                 match.getHomeTeam().getName(), match.getAwayTeam().getName(),
                 match.getFullTimeHomeGoals(), match.getFullTimeAwayGoals(),
                 match.getHomeXg(), match.getAwayXg(), match.getCorners(),
-                match.getYellowCards(), match.getRedCards(), decorate(match).descripcion());
+                match.getYellowCards(), match.getRedCards(), decorate(match).descripcion(),
+                match.getMatchDate() == null ? null : SeasonUtil.label(SeasonUtil.startYear(match.getMatchDate())));
     }
 
     /**
