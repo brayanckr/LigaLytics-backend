@@ -40,6 +40,11 @@ public record PredictionResponseDto(
         @Schema(description = "Probabilidad de victoria local según el modelo propio") double ownHomeWinProbability,
         @Schema(description = "Probabilidad de empate según el modelo propio") double ownDrawProbability,
         @Schema(description = "Probabilidad de victoria visitante según el modelo propio") double ownAwayWinProbability,
+        @Schema(description = "Marcadores más probables (coherentes con el ganador previsto)") java.util.List<ScoreDto> topScores,
+        @Schema(description = "Probabilidad de más de 2,5 goles") double goalsOver25Probability,
+        @Schema(description = "Probabilidad de que marquen ambos equipos") double bothTeamsScoreProbability,
+        @Schema(description = "Cómo se determinó el total de goles (forma, localía, enfrentamientos directos...)")
+        java.util.List<String> goalFactors,
         @Schema(description = "Indica si la predicción se sirvió desde caché") boolean fromCache,
         Instant generatedAt
 ) {
@@ -50,6 +55,7 @@ public record PredictionResponseDto(
                 goalsOutcome, mostLikelyScore, expectedCorners, cornersOutcome, expectedCards, cardsOutcome,
                 expectedHomeYellowCards, expectedAwayYellowCards, expectedHomeRedCards, expectedAwayRedCards,
                 strategies, dataSeason, winnerSource, ownHomeWinProbability, ownDrawProbability,
-                ownAwayWinProbability, true, generatedAt);
+                ownAwayWinProbability, topScores, goalsOver25Probability, bothTeamsScoreProbability, goalFactors,
+                true, generatedAt);
     }
 }

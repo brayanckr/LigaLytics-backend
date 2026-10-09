@@ -29,6 +29,10 @@ import com.ligalytics.patterns.decorator.UnderstatDecorator;
 import com.ligalytics.patterns.factory.PredictionStrategyResolver;
 import com.ligalytics.patterns.factory.PredictorType;
 import com.ligalytics.patterns.strategy.PoissonStrategy;
+import com.ligalytics.patterns.strategy.FootballChartsStrategy;
+import com.ligalytics.patterns.builder.AdvancedStats;
+import com.ligalytics.service.ScoreDistribution;
+import com.ligalytics.service.dto.ScoreDto;
 import com.ligalytics.patterns.strategy.Prediction;
 import com.ligalytics.patterns.strategy.PredictionStrategy;
 import com.ligalytics.repository.MatchRepository;
@@ -40,6 +44,7 @@ import com.ligalytics.service.StandingsHeap;
 import com.ligalytics.service.StandingsHeap.Standing;
 import com.ligalytics.service.dto.DataStatusDto;
 import com.ligalytics.service.dto.EtlSeasonResult;
+import com.ligalytics.service.dto.HeadToHeadDto;
 import com.ligalytics.service.dto.MatchSummaryDto;
 import com.ligalytics.service.dto.PredictionResponseDto;
 import com.ligalytics.service.dto.RankingEntryDto;
@@ -207,6 +212,13 @@ public class LigaLyticsFacade {
         double ownAway = ownResult.awayValue();
         double ownDraw = Math.max(0.0, 1.0 - ownHome - ownAway);
 
+        // Total de goles: forma, localia y enfrentamientos directos (Poisson propio); si el modelo externo da
+        // sus goles esperados, se promedian. El reparto entre equipos se calibra al ganador previsto.
+        double formTotal = goals.total();
+        Double externalTotal = resultStrategy instanceof FootballChartsStrategy fc ? fc.odds().expectedTotalGoals() : null;
+        double totalGoals = externalTotal == null ? formTotal : 0.5 * formTotal + 0.5 * externalTotal;
+        ScoreDistribution distribution = ScoreDistribution.calibrate(totalGoals, homeProbability, awayProbability);
+
         CardsBreakdown cardsBreakdown = CardsBreakdown.of(cards, analysis);
         Map<String, String> strategies = new LinkedHashMap<>();
         strategies.put("resultado", resultStrategy.name());
@@ -217,19 +229,84 @@ public class LigaLyticsFacade {
         PredictionResponseDto response = new PredictionResponseDto(
                 home.getId(), home.getName(), away.getId(), away.getName(),
                 result.outcome(), homeProbability, drawProbability, awayProbability,
-                round(goals.homeValue()), round(goals.awayValue()), goals.outcome(),
-                PoissonStrategy.mostLikelyScore(goals.homeValue(), goals.awayValue()),
+                round(distribution.homeLambda()), round(distribution.awayLambda()),
+                distribution.over25() >= 0.5 ? "OVER_2_5" : "UNDER_2_5",
+                distribution.mostLikelyScore(result.outcome()),
                 round(corners.total()), corners.outcome(),
                 round(cards.total()), cards.outcome(),
                 cardsBreakdown.homeYellow(), cardsBreakdown.awayYellow(),
                 cardsBreakdown.homeRed(), cardsBreakdown.awayRed(),
                 strategies, analysis.getSeason(),
                 external ? resultStrategy.name() : "modelo-propio", ownHome, ownDraw, ownAway,
+                distribution.topScores(5).stream()
+                        .map(s -> new ScoreDto(s.score(), round4(s.probability()))).toList(),
+                round4(distribution.over25()), round4(distribution.bothTeamsScore()),
+                goalFactors(analysis, formTotal, externalTotal, totalGoals, external ? resultStrategy.name() : null),
                 false, java.time.Instant.now());
 
         predictionCache.put(cacheKey, response);
         predictionLogService.save(response);
         return response;
+    }
+
+    /**
+     * Últimos enfrentamientos directos entre dos equipos (cualquier sede), del más reciente al más antiguo.
+     * Las victorias del resumen se cuentan desde el punto de vista del primer equipo.
+     */
+    @Transactional(readOnly = true)
+    public HeadToHeadDto headToHead(Long teamAId, Long teamBId, int limit) {
+        Team teamA = findTeam(teamAId);
+        Team teamB = findTeam(teamBId);
+        List<Match> meetings = matchRepository.findAllWithTeams().stream()
+                .filter(m -> m.getFullTimeHomeGoals() != null && m.getFullTimeAwayGoals() != null)
+                .filter(m -> (m.getHomeTeam().getId().equals(teamAId) && m.getAwayTeam().getId().equals(teamBId))
+                        || (m.getHomeTeam().getId().equals(teamBId) && m.getAwayTeam().getId().equals(teamAId)))
+                .sorted(Comparator.comparing(Match::getMatchDate).reversed())
+                .limit(Math.max(1, Math.min(limit, 50)))
+                .toList();
+
+        int winsA = 0;
+        int draws = 0;
+        int winsB = 0;
+        double goals = 0.0;
+        double corners = 0.0;
+        int cornersCount = 0;
+        double cards = 0.0;
+        int cardsCount = 0;
+        List<HeadToHeadDto.Meeting> rows = new ArrayList<>();
+        for (Match m : meetings) {
+            int homeGoals = m.getFullTimeHomeGoals();
+            int awayGoals = m.getFullTimeAwayGoals();
+            boolean aIsHome = m.getHomeTeam().getId().equals(teamAId);
+            int goalsA = aIsHome ? homeGoals : awayGoals;
+            int goalsB = aIsHome ? awayGoals : homeGoals;
+            if (goalsA > goalsB) {
+                winsA++;
+            } else if (goalsA == goalsB) {
+                draws++;
+            } else {
+                winsB++;
+            }
+            goals += homeGoals + awayGoals;
+            Integer matchCards = m.getYellowCards() == null ? null
+                    : m.getYellowCards() + (m.getRedCards() == null ? 0 : m.getRedCards());
+            if (m.getCorners() != null) {
+                corners += m.getCorners();
+                cornersCount++;
+            }
+            if (matchCards != null) {
+                cards += matchCards;
+                cardsCount++;
+            }
+            rows.add(new HeadToHeadDto.Meeting(m.getMatchDate(), SeasonUtil.label(SeasonUtil.startYear(m.getMatchDate())),
+                    m.getHomeTeam().getName(), m.getAwayTeam().getName(), homeGoals, awayGoals, m.getCorners(),
+                    matchCards));
+        }
+        int played = meetings.size();
+        HeadToHeadDto.Summary summary = new HeadToHeadDto.Summary(played, winsA, draws, winsB,
+                played == 0 ? 0.0 : round(goals / played), cornersCount == 0 ? null : round(corners / cornersCount),
+                cardsCount == 0 ? null : round(cards / cardsCount));
+        return new HeadToHeadDto(teamA.getName(), teamB.getName(), summary, rows);
     }
 
     /**
@@ -524,6 +601,40 @@ public class LigaLyticsFacade {
 
     private static double average(int total, int played) {
         return played == 0 ? 0.0 : (double) total / played;
+    }
+
+    private static double round4(double value) {
+        return Math.round(value * 10_000.0) / 10_000.0;
+    }
+
+    /** Explica en lenguaje natural de donde sale el total de goles esperado. */
+    private static List<String> goalFactors(MatchAnalysis a, double formTotal, Double externalTotal, double totalGoals,
+            String externalSource) {
+        List<String> factors = new ArrayList<>();
+        factors.add(String.format("Forma reciente (últimos 10 partidos): %s marca %.2f y encaja %.2f; %s marca %.2f y encaja %.2f.",
+                a.getHomeTeam(), a.getHomeAverageGoalsFor(), a.getHomeAverageGoalsAgainst(),
+                a.getAwayTeam(), a.getAwayAverageGoalsFor(), a.getAwayAverageGoalsAgainst()));
+        if (a.hasAdvanced(AdvancedStats.HOME_LONG_GF)) {
+            factors.add(String.format("Nivel a largo plazo: %s %.2f a favor y %.2f en contra por partido; %s %.2f y %.2f.",
+                    a.getHomeTeam(), a.advanced(AdvancedStats.HOME_LONG_GF, 0), a.advanced(AdvancedStats.HOME_LONG_GA, 0),
+                    a.getAwayTeam(), a.advanced(AdvancedStats.AWAY_LONG_GF, 0), a.advanced(AdvancedStats.AWAY_LONG_GA, 0)));
+        }
+        if (a.getLeagueAverageHomeGoals() != null && a.getLeagueAverageAwayGoals() != null) {
+            factors.add(String.format("Localía: en LaLiga los locales marcan %.2f goles de media y los visitantes %.2f.",
+                    a.getLeagueAverageHomeGoals(), a.getLeagueAverageAwayGoals()));
+        }
+        if (a.advanced(AdvancedStats.H2H_MATCHES, 0.0) >= 1.0) {
+            int n = (int) a.advanced(AdvancedStats.H2H_MATCHES, 0.0);
+            factors.add(String.format("Enfrentamientos directos: %d últimos partidos con %.2f goles de media%s.", n,
+                    a.advanced(AdvancedStats.H2H_AVG_GOALS, 0.0), n >= 3 ? " (pesa un 20 %)" : " (pocos precedentes: no se usa)"));
+        }
+        factors.add(String.format("Total esperado por el modelo propio: %.2f goles.", formTotal));
+        if (externalTotal != null) {
+            factors.add(String.format("Total esperado por %s: %.2f goles. Se promedian: %.2f.", externalSource,
+                    externalTotal, totalGoals));
+        }
+        factors.add("El reparto entre local y visitante se ajusta para que el marcador concuerde con las probabilidades de ganador.");
+        return factors;
     }
 
     private static double round(double value) {
