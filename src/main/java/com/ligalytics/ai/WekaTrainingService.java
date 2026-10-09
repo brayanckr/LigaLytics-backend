@@ -69,12 +69,29 @@ public class WekaTrainingService {
     /** Entrena y valida todos los modelos a partir de los datos de la BD. */
     @Transactional(readOnly = true)
     public TrainingReport trainAll() {
-        return train(matchRepository.findAllWithTeams());
+        return trainAll(null);
+    }
+
+    /**
+     * Igual que {@link #trainAll()} pero solo usa partidos desde la temporada indicada
+     * (año de inicio, p. ej. 2022 = 2022/23). El historial anterior sigue alimentando
+     * las variables (Elo, forma...), solo deja de usarse para entrenar y validar.
+     */
+    @Transactional(readOnly = true)
+    public TrainingReport trainAll(Integer fromSeasonStartYear) {
+        int from = fromSeasonStartYear != null ? fromSeasonStartYear : properties.getTrainFromSeasonStartYear();
+        return train(matchRepository.findAllWithTeams(), from);
     }
 
     /** Entrena y valida todos los modelos a partir de una lista de partidos. */
-    public synchronized TrainingReport train(List<Match> matches) {
-        List<Sample> samples = datasetConverter.samples(matches);
+    public TrainingReport train(List<Match> matches) {
+        return train(matches, properties.getTrainFromSeasonStartYear());
+    }
+
+    public synchronized TrainingReport train(List<Match> matches, int fromSeasonStartYear) {
+        List<Sample> samples = datasetConverter.samples(matches).stream()
+                .filter(sample -> sample.seasonStartYear() >= fromSeasonStartYear)
+                .toList();
         Split split = split(samples);
 
         List<TrainingReport.TargetResult> results = new ArrayList<>();

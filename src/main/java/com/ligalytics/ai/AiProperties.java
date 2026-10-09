@@ -30,6 +30,9 @@ public class AiProperties {
      */
     private int testSeasonStartYear = 0;
 
+    /** Primera temporada (año de inicio) usada para entrenar y validar; 0 = todas las disponibles. */
+    private int trainFromSeasonStartYear = 0;
+
     public String getModelPath() {
         return modelPath;
     }
@@ -52,6 +55,14 @@ public class AiProperties {
 
     public void setCrossValidationFolds(int crossValidationFolds) {
         this.crossValidationFolds = crossValidationFolds;
+    }
+
+    public int getTrainFromSeasonStartYear() {
+        return trainFromSeasonStartYear;
+    }
+
+    public void setTrainFromSeasonStartYear(int trainFromSeasonStartYear) {
+        this.trainFromSeasonStartYear = trainFromSeasonStartYear;
     }
 
     public int getTestSeasonStartYear() {

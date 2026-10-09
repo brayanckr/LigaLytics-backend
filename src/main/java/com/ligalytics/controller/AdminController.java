@@ -245,9 +245,11 @@ public class AdminController {
                     + "de prueba y guarda los modelos definitivos (entrenados con todos los datos).")
     @ApiResponse(responseCode = "200", description = "Informe de entrenamiento con las métricas")
     @ApiResponse(responseCode = "401", description = "Clave de administración incorrecta")
-    public TrainingReport train(@RequestHeader(name = "X-Admin-Key", required = false) String apiKey) {
+    public TrainingReport train(@RequestHeader(name = "X-Admin-Key", required = false) String apiKey,
+            @Parameter(description = "Primera temporada para entrenar (año de inicio, p. ej. 2022); por defecto todas")
+            @RequestParam(name = "fromSeason", required = false) Integer fromSeason) {
         requireAdminKey(apiKey);
-        return trainingService.trainAll();
+        return trainingService.trainAll(fromSeason);
     }
 
     private List<String> resolveSeasons(List<String> requested) {
