@@ -32,13 +32,16 @@ public class FixturesService {
 
     private final FixturesProvider provider;
     private final TeamRepository teamRepository;
+    private final com.ligalytics.external.FootballChartsClient footballCharts;
 
     private List<Fixture> cached = List.of();
     private Instant fetchedAt = Instant.EPOCH;
 
-    public FixturesService(FixturesProvider provider, TeamRepository teamRepository) {
+    public FixturesService(FixturesProvider provider, TeamRepository teamRepository,
+            com.ligalytics.external.FootballChartsClient footballCharts) {
         this.provider = provider;
         this.teamRepository = teamRepository;
+        this.footballCharts = footballCharts;
     }
 
     public boolean isConfigured() {
@@ -106,6 +109,7 @@ public class FixturesService {
         return new FixtureDto(f.id(), f.utcDate(), f.status(), f.matchday(),
                 home != null ? home.getName() : f.homeName(), away != null ? away.getName() : f.awayName(),
                 home != null ? home.getId() : null, away != null ? away.getId() : null,
-                f.homeCrest(), f.awayCrest(), f.homeGoals(), f.awayGoals());
+                f.homeCrest(), f.awayCrest(), f.homeGoals(), f.awayGoals(),
+                "SCHEDULED".equals(f.status()) ? footballCharts.winnerOdds(f.homeName(), f.awayName()).orElse(null) : null);
     }
 }

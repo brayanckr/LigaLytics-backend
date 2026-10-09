@@ -17,5 +17,7 @@ public record FixtureDto(
         String homeCrest,
         String awayCrest,
         Integer homeGoals,
-        Integer awayGoals) {
+        Integer awayGoals,
+        @Schema(description = "Probabilidades de ganador del modelo externo (solo partidos por jugar que el modelo tiene)")
+        com.ligalytics.external.WinnerOdds winner) {
 }
