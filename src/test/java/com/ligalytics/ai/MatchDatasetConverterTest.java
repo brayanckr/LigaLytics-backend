@@ -137,6 +137,18 @@ class MatchDatasetConverterTest {
     }
 
     @Test
+    void headToHeadUsesOnlyEarlierMeetings() {
+        List<Sample> samples = converter.samples(sampleMatches());
+        var key = com.ligalytics.patterns.builder.AdvancedStats.H2H_MATCHES;
+        var avg = com.ligalytics.patterns.builder.AdvancedStats.H2H_AVG_GOALS;
+
+        // Sin precedentes en el 1.er partido; en el 4.o hay 3 (3, 2 y 2 goles totales).
+        assertEquals(false, samples.get(0).analysis().hasAdvanced(key));
+        assertEquals(3.0, samples.get(3).analysis().advanced(key, 0), 1e-9);
+        assertEquals((3 + 2 + 2) / 3.0, samples.get(3).analysis().advanced(avg, 0), 1e-9);
+    }
+
+    @Test
     void featureVectorHasOneValuePerAttribute() {
         MatchAnalysis analysis = MatchAnalysis.builder()
                 .teams("Team A", "Team B")

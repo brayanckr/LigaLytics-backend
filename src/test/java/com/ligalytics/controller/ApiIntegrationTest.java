@@ -1,8 +1,10 @@
 package com.ligalytics.controller;
 
+import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -186,6 +188,31 @@ class ApiIntegrationTest {
         mockMvc.perform(get("/predict/history"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].homeTeam", is("Real Madrid")));
+    }
+
+    @Test
+    void headToHeadListsMeetingsInBothVenuesWithSummaryForTheFirstTeam() throws Exception {
+        mockMvc.perform(get("/teams/h2h").param("homeId", String.valueOf(realMadrid.getId()))
+                        .param("awayId", String.valueOf(barcelona.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.summary.played", is(2)))
+                .andExpect(jsonPath("$.summary.winsA", is(1)))
+                .andExpect(jsonPath("$.summary.draws", is(1)))
+                .andExpect(jsonPath("$.summary.winsB", is(0)))
+                .andExpect(jsonPath("$.summary.averageTotalGoals", is(2.5)))
+                // El más reciente primero: Barcelona 1-1 Real Madrid (8 de marzo)
+                .andExpect(jsonPath("$.matches[0].homeTeam", is("FC Barcelona")))
+                .andExpect(jsonPath("$.matches", hasSize(2)));
+    }
+
+    @Test
+    void predictionScoreAgreesWithTheWinnerAndExplainsTheGoals() throws Exception {
+        mockMvc.perform(post("/predict").contentType(MediaType.APPLICATION_JSON)
+                        .content(predictBody(realMadrid.getId(), barcelona.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.topScores", hasSize(5)))
+                .andExpect(jsonPath("$.goalFactors", not(empty())))
+                .andExpect(jsonPath("$.goalsOver25Probability", greaterThan(0.0)));
     }
 
     @Test
