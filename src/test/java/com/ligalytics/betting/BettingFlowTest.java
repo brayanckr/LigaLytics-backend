@@ -223,6 +223,37 @@ class BettingFlowTest {
     }
 
     @Test
+    void contradictoryOrRedundantSelectionsOfTheSameMatchCannotBeCombined() {
+        secondEvent();
+        BettingService.LegRequest other = new BettingService.LegRequest(778L, Market.CORNERS, "OVER", 9.5);
+        List<List<BettingService.LegRequest>> sameMatchPairs = List.of(
+                // Ganador y empate del mismo partido.
+                List.of(new BettingService.LegRequest(777L, Market.WINNER, "HOME", null),
+                        new BettingService.LegRequest(777L, Market.WINNER, "DRAW", null)),
+                // Más y menos de 2,5 goles.
+                List.of(new BettingService.LegRequest(777L, Market.GOALS, "OVER", 2.5),
+                        new BettingService.LegRequest(777L, Market.GOALS, "UNDER", 2.5)),
+                // La misma selección repetida.
+                List.of(new BettingService.LegRequest(777L, Market.WINNER, "HOME", null),
+                        new BettingService.LegRequest(777L, Market.WINNER, "HOME", null)),
+                // Dos mercados distintos del mismo partido (correlacionados) tampoco se combinan.
+                List.of(new BettingService.LegRequest(777L, Market.WINNER, "HOME", null),
+                        new BettingService.LegRequest(777L, Market.GOALS, "OVER", 2.5)));
+
+        for (List<BettingService.LegRequest> pair : sameMatchPairs) {
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                    () -> service.placeParlay(userId, 5_000, pair));
+            assertEquals("No se pueden combinar dos selecciones del mismo partido", error.getMessage());
+            // Tampoco con una tercera selección válida de otro partido.
+            List<BettingService.LegRequest> withThird = new java.util.ArrayList<>(pair);
+            withThird.add(other);
+            assertThrows(IllegalArgumentException.class, () -> service.placeParlay(userId, 5_000, withThird));
+        }
+        assertEquals(100_000L, balance());
+        assertEquals(0, service.parlaysOf(userId).size());
+    }
+
+    @Test
     void aParlayPaysOnlyWhenEveryLegWins() {
         secondEvent();
         Parlay winning = service.placeParlay(userId, 10_000, List.of(
