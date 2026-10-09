@@ -61,6 +61,9 @@ public final class TeamFormTracker {
     private final Map<Long, TeamState> states = new HashMap<>();
     private final Map<Integer, Map<Long, SeasonRow>> seasonTables = new HashMap<>();
     private final League league = new League();
+    /** Ultimos enfrentamientos directos por pareja de equipos: goles totales de cada partido (hasta 5). */
+    private final Map<String, Deque<Integer>> headToHead = new HashMap<>();
+    private static final int H2H_WINDOW = 5;
 
     /**
      * Estado de la liga justo antes de {@code date} para el enfrentamiento
@@ -124,6 +127,8 @@ public final class TeamFormTracker {
                 .advanced(AdvancedStats.AWAY_XG_AGAINST, awayState.averageNullable(Played::xgAgainst, xgPrior))
                 .advanced(AdvancedStats.XG_AVAILABLE, xgAvailable ? 1.0 : 0.0)
                 .advanced(AdvancedStats.HOME_REST_DAYS, homeState.restDays(date))
+                .advanced(AdvancedStats.H2H_MATCHES, h2hCount(home.getId(), away.getId()))
+                .advanced(AdvancedStats.H2H_AVG_GOALS, h2hAverage(home.getId(), away.getId()))
                 .advanced(AdvancedStats.AWAY_REST_DAYS, awayState.restDays(date))
                 .build();
     }
@@ -147,6 +152,12 @@ public final class TeamFormTracker {
         Double homeRed = ownCards(match.getHomeRedCards(), match.getRedCards());
         Double awayRed = ownCards(match.getAwayRedCards(), match.getRedCards());
 
+        Deque<Integer> pair = headToHead.computeIfAbsent(pairKey(match.getHomeTeam().getId(), match.getAwayTeam().getId()),
+                key -> new ArrayDeque<>());
+        pair.addLast(homeGoals + awayGoals);
+        if (pair.size() > H2H_WINDOW) {
+            pair.removeFirst();
+        }
         TeamState home = state(match.getHomeTeam().getId());
         TeamState away = state(match.getAwayTeam().getId());
         home.startSeason(seasonYear);
@@ -176,6 +187,23 @@ public final class TeamFormTracker {
     /** Número de partidos registrados con marcador. */
     public int matchesRecorded() {
         return league.matches;
+    }
+
+    private static String pairKey(Long a, Long b) {
+        return Math.min(a, b) + "-" + Math.max(a, b);
+    }
+
+    private Double h2hCount(Long home, Long away) {
+        Deque<Integer> pair = headToHead.get(pairKey(home, away));
+        return pair == null ? null : (double) pair.size();
+    }
+
+    private Double h2hAverage(Long home, Long away) {
+        Deque<Integer> pair = headToHead.get(pairKey(home, away));
+        if (pair == null || pair.isEmpty()) {
+            return null;
+        }
+        return pair.stream().mapToInt(Integer::intValue).average().orElse(0.0);
     }
 
     /** Elo de un equipo en este momento (1500 si no se conoce). */

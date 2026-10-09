@@ -28,6 +28,9 @@ public final class AdvancedStats {
     public static final String AWAY_SOT_AGAINST = "awayShotsOnTargetAgainst";
     public static final String HOME_REST_DAYS = "homeRestDays";
     public static final String AWAY_REST_DAYS = "awayRestDays";
+    /** Enfrentamientos directos previos (hasta 5) y su media de goles totales; solo si hay al menos uno. */
+    public static final String H2H_MATCHES = "h2hMatches";
+    public static final String H2H_AVG_GOALS = "h2hAvgGoals";
     public static final String HOME_XG_FOR = "homeXgFor";
     public static final String HOME_XG_AGAINST = "homeXgAgainst";
     public static final String AWAY_XG_FOR = "awayXgFor";

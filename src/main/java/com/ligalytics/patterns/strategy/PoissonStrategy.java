@@ -93,6 +93,14 @@ public class PoissonStrategy implements PredictionStrategy {
             home = PredictorSupport.value(analysis.getHomeXg());
             away = PredictorSupport.value(analysis.getAwayXg());
         }
+        // Enfrentamientos directos: con al menos 3 precedentes, el total de goles se acerca un 20 % a su media historica.
+        if (analysis.advanced(AdvancedStats.H2H_MATCHES, 0.0) >= 3.0 && analysis.hasAdvanced(AdvancedStats.H2H_AVG_GOALS)
+                && home + away > 0.0) {
+            double total = home + away;
+            double adjusted = 0.8 * total + 0.2 * analysis.advanced(AdvancedStats.H2H_AVG_GOALS, total);
+            home = home * adjusted / total;
+            away = away * adjusted / total;
+        }
         return new double[] { PredictorSupport.clamp(home, 0.05, 6.0), PredictorSupport.clamp(away, 0.05, 6.0) };
     }
 
