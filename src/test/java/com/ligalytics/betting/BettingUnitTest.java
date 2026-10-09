@@ -78,6 +78,30 @@ class BettingUnitTest {
     }
 
     @Test
+    void parlayResolutionFollowsTheUsualRules() {
+        List<Double> odds = List.of(2.0, 1.5, 3.0);
+        // Todas ganadas: se paga el producto.
+        ParlaySettlement.Result won = ParlaySettlement.resolve(
+                List.of(BetStatus.WON, BetStatus.WON, BetStatus.WON), odds);
+        assertEquals(BetStatus.WON, won.status());
+        assertEquals(9.0, won.effectiveOdds(), 1e-9);
+        // Una perdida pierde la combinada aunque otras sigan pendientes.
+        assertEquals(BetStatus.LOST, ParlaySettlement.resolve(
+                List.of(BetStatus.WON, BetStatus.LOST, BetStatus.PENDING), odds).status());
+        // Con una pendiente y ninguna perdida se espera.
+        assertEquals(BetStatus.PENDING, ParlaySettlement.resolve(
+                List.of(BetStatus.WON, BetStatus.PENDING, BetStatus.WON), odds).status());
+        // Una anulada cuenta con cuota 1.
+        ParlaySettlement.Result partial = ParlaySettlement.resolve(
+                List.of(BetStatus.WON, BetStatus.VOID, BetStatus.WON), odds);
+        assertEquals(BetStatus.WON, partial.status());
+        assertEquals(6.0, partial.effectiveOdds(), 1e-9);
+        // Todas anuladas: se devuelve el importe.
+        assertEquals(BetStatus.VOID, ParlaySettlement.resolve(
+                List.of(BetStatus.VOID, BetStatus.VOID, BetStatus.VOID), odds).status());
+    }
+
+    @Test
     void suggestedStakeIsCappedAtFivePercentAndNeverBelowTheMinimum() {
         OddsLine line = new OddsLine(Market.WINNER, "AWAY", null, 2.0, "consenso");
 

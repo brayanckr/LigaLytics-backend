@@ -52,6 +52,8 @@ class BettingFlowTest {
     @Autowired
     private BetRepository bets;
     @Autowired
+    private ParlayRepository parlays;
+    @Autowired
     private TeamRepository teamRepository;
     @Autowired
     private MatchRepository matchRepository;
@@ -66,6 +68,7 @@ class BettingFlowTest {
     @BeforeEach
     void setUp() {
         bets.deleteAll();
+        parlays.deleteAll();
         sessions.deleteAll();
         users.deleteAll();
         matchRepository.deleteAll();
@@ -179,6 +182,76 @@ class BettingFlowTest {
         assertEquals(BetStatus.LOST, bets.findById(lost.getId()).orElseThrow().getStatus());
         assertEquals(BetStatus.VOID, bets.findById(orphan.getId()).orElseThrow().getStatus());
         assertEquals(100_000L - 10_000L, balance());
+    }
+
+    private OddsEvent secondEvent() {
+        OddsEvent second = new OddsEvent(778L, Instant.now().plus(2, ChronoUnit.DAYS), "Real Madrid", "Barcelona");
+        when(oddsProvider.upcoming(anyInt())).thenReturn(List.of(event, second));
+        return second;
+    }
+
+    @Test
+    void aParlayMultipliesTheOddsAndDeductsTheStake() {
+        secondEvent();
+
+        Parlay parlay = service.placeParlay(userId, 10_000, List.of(
+                new BettingService.LegRequest(777L, Market.WINNER, "home", null),
+                new BettingService.LegRequest(778L, Market.CORNERS, "OVER", 9.5)));
+
+        assertEquals(3.6, parlay.getTotalOdds(), 1e-9);
+        assertEquals(2, parlay.getLegs().size());
+        assertEquals(90_000L, balance());
+        assertEquals(BetStatus.PENDING, parlay.getStatus());
+    }
+
+    @Test
+    void invalidParlaysAreRejectedWithoutTouchingTheBalance() {
+        secondEvent();
+        BettingService.LegRequest winner = new BettingService.LegRequest(777L, Market.WINNER, "HOME", null);
+        BettingService.LegRequest corners = new BettingService.LegRequest(778L, Market.CORNERS, "OVER", 9.5);
+
+        // Una sola selección, dos del mismo partido, una cuota inexistente, importe bajo y saldo insuficiente.
+        assertThrows(IllegalArgumentException.class, () -> service.placeParlay(userId, 5_000, List.of(winner)));
+        assertThrows(IllegalArgumentException.class, () -> service.placeParlay(userId, 5_000, List.of(winner,
+                new BettingService.LegRequest(777L, Market.GOALS, "OVER", 2.5))));
+        assertThrows(IllegalArgumentException.class, () -> service.placeParlay(userId, 5_000, List.of(winner,
+                new BettingService.LegRequest(778L, Market.WINNER, "DRAW", null))));
+        assertThrows(IllegalArgumentException.class, () -> service.placeParlay(userId, 500, List.of(winner, corners)));
+        assertThrows(IllegalArgumentException.class, () -> service.placeParlay(userId, 200_000, List.of(winner, corners)));
+        assertEquals(100_000L, balance());
+        assertEquals(0, service.parlaysOf(userId).size());
+    }
+
+    @Test
+    void aParlayPaysOnlyWhenEveryLegWins() {
+        secondEvent();
+        Parlay winning = service.placeParlay(userId, 10_000, List.of(
+                new BettingService.LegRequest(777L, Market.WINNER, "HOME", null),
+                new BettingService.LegRequest(778L, Market.CORNERS, "OVER", 9.5)));
+        Parlay losing = service.placeParlay(userId, 5_000, List.of(
+                new BettingService.LegRequest(777L, Market.WINNER, "AWAY", null),
+                new BettingService.LegRequest(778L, Market.CORNERS, "OVER", 9.5)));
+        assertEquals(85_000L, balance());
+
+        // El partido se jugó hace 3 horas y terminó 2-1 con 11 córneres.
+        Instant played = Instant.now().minus(3, ChronoUnit.HOURS);
+        for (Parlay parlay : List.of(winning, losing)) {
+            parlay.getLegs().forEach(leg -> leg.setKickoff(played));
+            parlays.save(parlay);
+        }
+        Team madrid = teamRepository.findByNameIgnoreCase("Real Madrid").orElseThrow();
+        Team barcelona = teamRepository.findByNameIgnoreCase("Barcelona").orElseThrow();
+        matchRepository.save(Match.builder().matchDate(LocalDateTime.ofInstant(played, ZoneId.of("Europe/Madrid")))
+                .homeTeam(madrid).awayTeam(barcelona).fullTimeHomeGoals(2).fullTimeAwayGoals(1).corners(11)
+                .yellowCards(3).redCards(0).build());
+
+        assertEquals(2, service.settlePending());
+
+        assertEquals(BetStatus.WON, parlays.findById(winning.getId()).orElseThrow().getStatus());
+        assertEquals(BetStatus.LOST, parlays.findById(losing.getId()).orElseThrow().getStatus());
+        // 85 000 + 10 000 x 3,6
+        assertEquals(85_000L + 36_000L, balance());
+        assertEquals(0, service.settlePending());
     }
 
     @Test
