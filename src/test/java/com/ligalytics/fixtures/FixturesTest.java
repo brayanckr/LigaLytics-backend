@@ -70,7 +70,7 @@ class FixturesTest {
                 Team.builder().id(1L).name("Atletico Madrid").build(),
                 Team.builder().id(2L).name("Oviedo").build(),
                 Team.builder().id(3L).name("Barcelona").build()));
-        FixturesService service = new FixturesService(provider, teams);
+        FixturesService service = new FixturesService(provider, teams, mock(com.ligalytics.external.FootballChartsClient.class));
 
         List<FixtureDto> day = service.between(LocalDate.of(2026, 10, 10), LocalDate.of(2026, 10, 10), ZoneId.of("UTC"));
 
