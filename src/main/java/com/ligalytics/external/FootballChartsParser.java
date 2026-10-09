@@ -39,13 +39,19 @@ public class FootballChartsParser {
                 if (home == null || away == null || !block.path("home").isNumber() || !block.path("away").isNumber()) {
                     continue;
                 }
+                JsonNode raw = model.path("raw");
                 fixtures.add(new ExternalFixture(home, away, date(match.path("match_date").asText(null)),
-                        WinnerOdds.of(block.path("home").asDouble(), block.path("away").asDouble(), source)));
+                        WinnerOdds.of(block.path("home").asDouble(), block.path("away").asDouble(), source,
+                                number(raw.path("expected_home_goals")), number(raw.path("expected_away_goals")))));
             }
         } catch (java.io.IOException ex) {
             throw new IllegalStateException("Respuesta no válida de Football Charts", ex);
         }
         return fixtures;
+    }
+
+    private static Double number(JsonNode node) {
+        return node.isNumber() ? node.asDouble() : null;
     }
 
     private static LocalDate date(String value) {

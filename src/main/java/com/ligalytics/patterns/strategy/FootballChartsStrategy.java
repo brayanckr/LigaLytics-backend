@@ -24,6 +24,11 @@ public class FootballChartsStrategy implements PredictionStrategy {
         return odds.source();
     }
 
+    /** Probabilidades externas que respaldan esta estrategia. */
+    public WinnerOdds odds() {
+        return odds;
+    }
+
     @Override
     public String target() {
         return "resultado";
