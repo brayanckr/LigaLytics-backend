@@ -6,6 +6,7 @@ import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,12 +21,15 @@ import com.ligalytics.auth.UserRepository;
 import com.ligalytics.betting.BettingService.BoardMatch;
 import com.ligalytics.betting.BettingService.Offer;
 import com.ligalytics.betting.BettingService.Recommendation;
+import com.ligalytics.exception.ResourceNotFoundException;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 /**
  * API de la demostración de apuestas. <b>Todo el dinero es ficticio</b>: simulador educativo, sin pagos ni
@@ -74,6 +78,31 @@ public class BettingController {
         }
     }
 
+    public record ParlayLegDto(long eventId, String homeTeam, String awayTeam, Instant kickoff, String market,
+            String marketLabel, String selection, Double line, double odds, String oddsSource, String status) {
+        static ParlayLegDto of(ParlayLeg l) {
+            return new ParlayLegDto(l.getEventId(), l.getHomeTeam(), l.getAwayTeam(), l.getKickoff(), l.getMarket().name(),
+                    l.getMarket().label(), l.getSelection(), l.getLine(), l.getOdds(), l.getOddsSource(),
+                    l.getStatus().name());
+        }
+    }
+
+    public record ParlayDto(Long id, double totalOdds, long stake, long potentialPayout, String status, long payout,
+            Instant placedAt, Instant settledAt, List<ParlayLegDto> legs) {
+        static ParlayDto of(Parlay p) {
+            return new ParlayDto(p.getId(), p.getTotalOdds(), p.getStake(), Math.round(p.getStake() * p.getTotalOdds()),
+                    p.getStatus().name(), p.getPayout(), p.getPlacedAt(), p.getSettledAt(),
+                    p.getLegs().stream().map(ParlayLegDto::of).toList());
+        }
+    }
+
+    public record ParlayLegRequest(@NotNull Long eventId, @NotBlank String market, @NotBlank String selection, Double line) {
+    }
+
+    public record PlaceParlayRequest(@NotNull Long stake,
+            @NotEmpty @Size(max = BettingService.MAX_LEGS) List<@Valid ParlayLegRequest> legs) {
+    }
+
     public record PlaceBetRequest(@NotNull Long eventId, @NotBlank String market, @NotBlank String selection, Double line,
             @NotNull Long stake) {
     }
@@ -98,6 +127,14 @@ public class BettingController {
         return service.board(days).stream().map(BettingMatchDto::of).toList();
     }
 
+    @GetMapping("/matches/{eventId}")
+    @Operation(summary = "Un partido con todos sus mercados y cuotas")
+    public BettingMatchDto match(@PathVariable long eventId) {
+        requireOdds();
+        return service.boardMatch(eventId).map(BettingMatchDto::of)
+                .orElseThrow(() -> new ResourceNotFoundException("El partido no está disponible para apostar"));
+    }
+
     @GetMapping("/recommendations")
     @Operation(summary = "Selecciones con ventaja según el modelo (no demostrada), con importe sugerido")
     public List<RecommendationDto> recommendations(@RequestAttribute(AuthInterceptor.USER_ATTRIBUTE) User user) {
@@ -118,6 +155,28 @@ public class BettingController {
         }
         return BetDto.of(service.placeBet(user.getId(), request.eventId(), market, request.selection().trim(),
                 request.line(), request.stake()));
+    }
+
+    @PostMapping("/parlays")
+    @Operation(summary = "Hace una apuesta combinada (parlay) con saldo ficticio: la cuota total es el producto de las cuotas")
+    public ParlayDto placeParlay(@RequestAttribute(AuthInterceptor.USER_ATTRIBUTE) User user,
+            @Valid @RequestBody PlaceParlayRequest request) {
+        requireOdds();
+        List<BettingService.LegRequest> legs = request.legs().stream().map(l -> {
+            try {
+                return new BettingService.LegRequest(l.eventId(), Market.valueOf(l.market().trim().toUpperCase()),
+                        l.selection().trim(), l.line());
+            } catch (IllegalArgumentException ex) {
+                throw new IllegalArgumentException("Mercado no válido: " + l.market());
+            }
+        }).toList();
+        return ParlayDto.of(service.placeParlay(user.getId(), request.stake(), legs));
+    }
+
+    @GetMapping("/parlays")
+    @Operation(summary = "Historial de combinadas de la cuenta")
+    public List<ParlayDto> parlays(@RequestAttribute(AuthInterceptor.USER_ATTRIBUTE) User user) {
+        return service.parlaysOf(user.getId()).stream().map(ParlayDto::of).toList();
     }
 
     @GetMapping("/bets")
@@ -142,7 +201,9 @@ public class BettingController {
     private WalletDto walletOf(Long userId) {
         long balance = users.findById(userId).map(User::getBalance).orElse(0L);
         long inPlay = service.betsOf(userId).stream().filter(b -> b.getStatus() == BetStatus.PENDING)
-                .mapToLong(Bet::getStake).sum();
+                .mapToLong(Bet::getStake).sum()
+                + service.parlaysOf(userId).stream().filter(p -> p.getStatus() == BetStatus.PENDING)
+                        .mapToLong(Parlay::getStake).sum();
         return new WalletDto(balance, User.INITIAL_BALANCE, inPlay, balance + inPlay - User.INITIAL_BALANCE, "COP (ficticio)",
                 NOTICE);
     }

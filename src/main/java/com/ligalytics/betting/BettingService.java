@@ -78,10 +78,20 @@ public class BettingService {
     private final LigaLyticsFacade facade;
     private final UserRepository users;
     private final BetRepository bets;
+    private final ParlayRepository parlays;
+
+    /** Selección pedida para una combinada: el cliente solo indica qué quiere, la cuota la pone el servidor. */
+    public record LegRequest(long eventId, Market market, String selection, Double line) {
+    }
+
+    public static final int MIN_LEGS = 2;
+    public static final int MAX_LEGS = 8;
+    public static final double MAX_TOTAL_ODDS = 1000.0;
 
     public BettingService(BzzoiroOddsProvider oddsProvider, TheOddsApiCardsProvider cardsProvider, BzzoiroClient bzzoiro,
             TeamRepository teamRepository, MatchRepository matchRepository, LigaLyticsFacade facade, UserRepository users,
-            BetRepository bets) {
+            BetRepository bets, ParlayRepository parlays) {
+        this.parlays = parlays;
         this.oddsProvider = oddsProvider;
         this.cardsProvider = cardsProvider;
         this.bzzoiro = bzzoiro;
@@ -107,6 +117,12 @@ public class BettingService {
             }
         }
         return board;
+    }
+
+    /** Un partido con todos sus mercados; vacío si ya no está disponible para apostar. */
+    @Transactional(readOnly = true)
+    public Optional<BoardMatch> boardMatch(long eventId) {
+        return oddsProvider.upcoming(14).stream().filter(e -> e.id() == eventId).findFirst().map(this::buildBoard);
     }
 
     /** Las mejores ventajas del modelo frente a las cuotas, con un importe sugerido (¼ de Kelly, máximo 5 % del saldo). */
@@ -184,11 +200,78 @@ public class BettingService {
         return bets.findTop100ByUserIdOrderByPlacedAtDesc(userId);
     }
 
+    @Transactional(readOnly = true)
+    public List<Parlay> parlaysOf(Long userId) {
+        return parlays.findTop100ByUserIdOrderByPlacedAtDesc(userId);
+    }
+
+    /**
+     * Registra una combinada: de 2 a 8 selecciones de partidos distintos (dos selecciones del mismo partido están
+     * correlacionadas y no se combinan). La cuota total es el producto de las cuotas que fija el servidor.
+     */
+    @Transactional
+    public Parlay placeParlay(Long userId, long stake, List<LegRequest> requests) {
+        if (stake < MIN_STAKE) {
+            throw new IllegalArgumentException("El importe mínimo es " + MIN_STAKE + " COP");
+        }
+        if (requests == null || requests.size() < MIN_LEGS || requests.size() > MAX_LEGS) {
+            throw new IllegalArgumentException("Una combinada lleva entre " + MIN_LEGS + " y " + MAX_LEGS + " selecciones");
+        }
+        if (requests.stream().map(LegRequest::eventId).distinct().count() != requests.size()) {
+            throw new IllegalArgumentException("No se pueden combinar dos selecciones del mismo partido");
+        }
+        List<OddsEvent> upcoming = oddsProvider.upcoming(14);
+        Parlay parlay = new Parlay();
+        double total = 1.0;
+        for (LegRequest request : requests) {
+            OddsEvent event = upcoming.stream().filter(e -> e.id() == request.eventId()).findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("Un partido de la combinada no está disponible para apostar"));
+            if (!event.kickoff().isAfter(Instant.now())) {
+                throw new IllegalArgumentException("Un partido de la combinada ya ha empezado");
+            }
+            BoardMatch match = buildBoard(event);
+            Offer offer = match.offers().stream()
+                    .filter(o -> o.line().sameAs(request.market(), request.selection(), request.line())).findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Una cuota de la combinada ya no está disponible (" + match.homeName() + " - " + match.awayName() + ")"));
+            total *= offer.line().odds();
+
+            ParlayLeg leg = new ParlayLeg();
+            leg.setEventId(event.id());
+            leg.setHomeTeam(match.homeName());
+            leg.setAwayTeam(match.awayName());
+            leg.setKickoff(event.kickoff());
+            leg.setMarket(request.market());
+            leg.setSelection(request.selection().toUpperCase());
+            leg.setLine(offer.line().line());
+            leg.setOdds(offer.line().odds());
+            leg.setOddsSource(offer.line().source());
+            parlay.addLeg(leg);
+        }
+        total = Math.round(total * 100.0) / 100.0;
+        if (total > MAX_TOTAL_ODDS) {
+            throw new IllegalArgumentException("La cuota total máxima de una combinada es " + (long) MAX_TOTAL_ODDS);
+        }
+
+        User user = users.findByIdForUpdate(userId).orElseThrow(() -> new IllegalArgumentException("Cuenta no encontrada"));
+        if (user.getBalance() < stake) {
+            throw new IllegalArgumentException("Saldo insuficiente");
+        }
+        user.setBalance(user.getBalance() - stake);
+        users.save(user);
+
+        parlay.setUserId(userId);
+        parlay.setStake(stake);
+        parlay.setTotalOdds(total);
+        return parlays.save(parlay);
+    }
+
     /** Devuelve el saldo a 100 000 COP ficticios y borra el historial de apuestas de la cuenta. */
     @Transactional
     public long resetWallet(Long userId) {
         User user = users.findByIdForUpdate(userId).orElseThrow(() -> new IllegalArgumentException("Cuenta no encontrada"));
         bets.deleteByUserId(userId);
+        parlays.deleteByUserId(userId);
         user.setBalance(User.INITIAL_BALANCE);
         users.save(user);
         return user.getBalance();
@@ -219,8 +302,8 @@ public class BettingService {
             if (bet.getKickoff().plus(SETTLE_AFTER_KICKOFF).isAfter(now)) {
                 continue;
             }
-            Optional<Match> match = findMatch(bet);
-            Optional<BetStatus> outcome = match.flatMap(m -> outcomeOf(bet, m));
+            Optional<BetStatus> outcome = outcomeOf(bet.getEventId(), bet.getHomeTeam(), bet.getAwayTeam(),
+                    bet.getKickoff(), bet.getMarket(), bet.getSelection(), bet.getLine());
             if (outcome.isEmpty()) {
                 if (bet.getKickoff().plus(VOID_AFTER).isBefore(now)) {
                     close(bet, BetStatus.VOID);
@@ -231,36 +314,85 @@ public class BettingService {
             close(bet, outcome.get());
             settled++;
         }
+        return settled + settleParlays(now);
+    }
+
+    /**
+     * Resuelve las selecciones pendientes de cada combinada cuyo partido terminó (anulándolas tras tres días sin
+     * datos) y cierra la combinada en cuanto se sabe el resultado: una selección perdida basta para perderla.
+     */
+    private int settleParlays(Instant now) {
+        int settled = 0;
+        for (Parlay parlay : parlays.findByStatus(BetStatus.PENDING)) {
+            for (ParlayLeg leg : parlay.getLegs()) {
+                if (leg.getStatus() != BetStatus.PENDING || leg.getKickoff().plus(SETTLE_AFTER_KICKOFF).isAfter(now)) {
+                    continue;
+                }
+                Optional<BetStatus> outcome = outcomeOf(leg.getEventId(), leg.getHomeTeam(), leg.getAwayTeam(),
+                        leg.getKickoff(), leg.getMarket(), leg.getSelection(), leg.getLine());
+                if (outcome.isPresent()) {
+                    leg.setStatus(outcome.get());
+                } else if (leg.getKickoff().plus(VOID_AFTER).isBefore(now)) {
+                    leg.setStatus(BetStatus.VOID);
+                }
+            }
+            ParlaySettlement.Result result = ParlaySettlement.resolve(
+                    parlay.getLegs().stream().map(ParlayLeg::getStatus).toList(),
+                    parlay.getLegs().stream().map(ParlayLeg::getOdds).toList());
+            if (result.status() == BetStatus.PENDING) {
+                parlays.save(parlay);
+                continue;
+            }
+            long payout = switch (result.status()) {
+                case WON -> Math.round(parlay.getStake() * result.effectiveOdds());
+                case VOID -> parlay.getStake();
+                default -> 0L;
+            };
+            parlay.setStatus(result.status());
+            parlay.setPayout(payout);
+            parlay.setSettledAt(now);
+            parlays.save(parlay);
+            if (payout > 0) {
+                User user = users.findByIdForUpdate(parlay.getUserId()).orElseThrow();
+                user.setBalance(user.getBalance() + payout);
+                users.save(user);
+            }
+            settled++;
+        }
         return settled;
     }
 
-    private Optional<BetStatus> outcomeOf(Bet bet, Match match) {
-        if (match.getFullTimeHomeGoals() == null || match.getFullTimeAwayGoals() == null) {
+    /** Resultado de una selección con los datos guardados del partido; vacío si aún no hay datos para decidirla. */
+    private Optional<BetStatus> outcomeOf(long eventId, String homeTeam, String awayTeam, Instant kickoff, Market market,
+            String selection, Double line) {
+        Optional<Match> found = findMatch(homeTeam, awayTeam, kickoff);
+        if (found.isEmpty() || found.get().getFullTimeHomeGoals() == null || found.get().getFullTimeAwayGoals() == null) {
             return Optional.empty();
         }
+        Match match = found.get();
         Integer corners = match.getCorners();
         Integer cards = match.getYellowCards() == null ? null
                 : match.getYellowCards() + (match.getRedCards() == null ? 0 : match.getRedCards());
-        if ((bet.getMarket() == Market.CORNERS && corners == null) || (bet.getMarket() == Market.CARDS && cards == null)) {
+        if ((market == Market.CORNERS && corners == null) || (market == Market.CARDS && cards == null)) {
             try {
-                Integer[] totals = bzzoiro.matchTotals(bet.getEventId());
+                Integer[] totals = bzzoiro.matchTotals(eventId);
                 corners = corners != null ? corners : totals[0];
                 cards = cards != null ? cards : totals[1];
             } catch (RuntimeException ex) {
-                log.debug("Sin estadisticas para el evento {}: {}", bet.getEventId(), ex.getMessage());
+                log.debug("Sin estadisticas para el evento {}: {}", eventId, ex.getMessage());
             }
         }
-        return BetSettlement.outcome(bet.getMarket(), bet.getSelection(), bet.getLine(),
-                match.getFullTimeHomeGoals(), match.getFullTimeAwayGoals(), corners, cards);
+        return BetSettlement.outcome(market, selection, line, match.getFullTimeHomeGoals(), match.getFullTimeAwayGoals(),
+                corners, cards);
     }
 
-    private Optional<Match> findMatch(Bet bet) {
-        Optional<Team> home = teamRepository.findByNameIgnoreCase(TeamNameNormalizer.canonical(bet.getHomeTeam()));
-        Optional<Team> away = teamRepository.findByNameIgnoreCase(TeamNameNormalizer.canonical(bet.getAwayTeam()));
+    private Optional<Match> findMatch(String homeTeam, String awayTeam, Instant kickoff) {
+        Optional<Team> home = teamRepository.findByNameIgnoreCase(TeamNameNormalizer.canonical(homeTeam));
+        Optional<Team> away = teamRepository.findByNameIgnoreCase(TeamNameNormalizer.canonical(awayTeam));
         if (home.isEmpty() || away.isEmpty()) {
             return Optional.empty();
         }
-        LocalDate day = bet.getKickoff().atZone(ZoneId.of("Europe/Madrid")).toLocalDate();
+        LocalDate day = kickoff.atZone(ZoneId.of("Europe/Madrid")).toLocalDate();
         return matchRepository.findFirstByHomeTeamIdAndAwayTeamIdAndMatchDateBetween(home.get().getId(),
                 away.get().getId(), day.minusDays(1).atStartOfDay(), day.plusDays(1).atTime(java.time.LocalTime.MAX));
     }
