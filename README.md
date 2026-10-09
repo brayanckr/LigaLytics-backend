@@ -21,6 +21,7 @@ DB_USERNAME=postgres
 DB_PASSWORD=tu_contraseña
 FOOTBALL_DATA_ORG_KEY=...   # calendario y resultados en vivo (football-data.org, gratis)
 BZZOIRO_API_KEY=...         # xG por partido (sports.bzzoiro.com, gratis)
+FOOTBALL_CHARTS_API_KEY=... # probabilidades de ganador (football-charts.com, gratis); sin clave se usa el modelo propio
 ADMIN_API_KEY=...           # opcional: protege /api/admin/**
 ```
 API en <http://localhost:8080/api> · Swagger en <http://localhost:8080/api/swagger-ui.html>.

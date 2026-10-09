@@ -501,3 +501,15 @@ Secretos de GitHub para el despliegue automático: `RAILWAY_TOKEN`, `RAILWAY_SER
 | Panel de administración | Pantalla Administración (forzar ETL, reentrenar, ver métricas) |
 | API documentada con Swagger | `/api/swagger-ui.html` |
 | Despliegue en la nube + CI/CD | Sección 6 |
+
+---
+
+## 8. Ganador con modelo externo (Football Charts)
+
+La predicción de ganador (1X2) usa, cuando existe, el modelo Dixon-Coles de Football Charts a través de una
+`FootballChartsStrategy` (patrón Strategy). `PredictionStrategyResolver.resolveExternalResultStrategy` la elige si el
+cliente (`FootballChartsClient`, con caché de 30 minutos) tiene el partido; si no, se usa el modelo propio (regresión
+logística de Weka). La respuesta indica `winnerSource` (`football-charts` o `modelo-propio`) y las probabilidades del
+modelo propio, y cada predicción se guarda en la tabla `predictions` con su fuente para poder medir después cuál acierta
+más. Goles, córneres y tarjetas siguen siendo del modelo propio. La API no ofrece probabilidades de partidos ya jugados,
+por lo que su acierto histórico no puede verificarse hacia atrás.
