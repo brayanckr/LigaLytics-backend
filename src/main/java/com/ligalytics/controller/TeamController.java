@@ -40,6 +40,18 @@ public class TeamController {
         return facade.listTeams(query);
     }
 
+    @GetMapping("/h2h")
+    @Operation(summary = "Últimos enfrentamientos directos entre dos equipos",
+            description = "Partidos jugados entre ambos en cualquier sede, del más reciente al más antiguo, con resumen.")
+    @ApiResponse(responseCode = "200", description = "Enfrentamientos directos")
+    @ApiResponse(responseCode = "404", description = "Alguno de los equipos no existe")
+    public com.ligalytics.service.dto.HeadToHeadDto headToHead(
+            @RequestParam("homeId") Long homeId,
+            @RequestParam("awayId") Long awayId,
+            @RequestParam(name = "limit", defaultValue = "10") int limit) {
+        return facade.headToHead(homeId, awayId, limit);
+    }
+
     @GetMapping("/{id}/stats")
     @Operation(summary = "Estadísticas e historial de un equipo",
             description = "Por defecto de la temporada más reciente en la que jugó; use season=2023 para 2023/24.")
