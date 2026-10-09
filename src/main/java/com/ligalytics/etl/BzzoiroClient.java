@@ -79,6 +79,50 @@ public class BzzoiroClient {
         return value.isNumber() ? OptionalDouble.of(value.asDouble()) : OptionalDouble.empty();
     }
 
+    /** Peticion GET generica a la API (ruta relativa, p. ej. {@code /events/123/odds/}). */
+    public JsonNode json(String path) {
+        return get(path);
+    }
+
+    /** Partidos de LaLiga aun por jugar entre dos fechas. */
+    public List<JsonNode> upcomingEvents(LocalDate from, LocalDate to) {
+        List<JsonNode> events = new ArrayList<>();
+        int offset = 0;
+        while (true) {
+            JsonNode page = get("/events/?league_id=" + leagueId + "&date_from=" + from + "&date_to=" + to
+                    + "&status=notstarted&limit=" + PAGE_SIZE + "&offset=" + offset);
+            page.path("results").forEach(events::add);
+            if (page.path("next").isNull() || page.path("next").isMissingNode()) {
+                break;
+            }
+            offset += PAGE_SIZE;
+        }
+        return events;
+    }
+
+    /** Filas de cuotas (consenso de casas) de un partido. */
+    public List<JsonNode> oddsRows(long eventId) {
+        List<JsonNode> rows = new ArrayList<>();
+        get("/odds/?event_id=" + eventId + "&limit=100").path("results").forEach(rows::add);
+        return rows;
+    }
+
+    /** Totales reales de un partido jugado: {corneres, tarjetas (amarillas + rojas)}; nulos si la API no los tiene. */
+    public Integer[] matchTotals(long eventId) {
+        JsonNode stats = get("/events/" + eventId + "/stats/").path("stats");
+        Integer corners = sum(stats, "corner_kicks");
+        Integer yellow = sum(stats, "yellow_cards");
+        Integer red = sum(stats, "red_cards");
+        Integer cards = yellow == null ? null : yellow + (red == null ? 0 : red);
+        return new Integer[] { corners, cards };
+    }
+
+    private static Integer sum(JsonNode stats, String field) {
+        JsonNode home = stats.path("home").path(field);
+        JsonNode away = stats.path("away").path(field);
+        return home.isNumber() && away.isNumber() ? home.asInt() + away.asInt() : null;
+    }
+
     private JsonNode get(String path) {
         RestClient client = RestClient.builder()
                 .baseUrl(baseUrl)

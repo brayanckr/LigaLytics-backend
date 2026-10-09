@@ -44,7 +44,7 @@ public final class TeamNameNormalizer {
         register("Real Madrid", "real madrid cf");
         register("Oviedo", "real oviedo");
         register("Racing Santander", "real racing club de santander", "racing de santander", "real racing club");
-        register("Deportivo La Coruna", "rc deportivo la coruna", "rc deportivo de la coruna");
+        register("Deportivo La Coruna", "rc deportivo la coruna", "rc deportivo de la coruna", "deportivo de a coruna", "deportivo de la coruna");
         register("Real Sociedad", "real sociedad de futbol");
         register("Real Sociedad", "sociedad");
         register("Sevilla", "sevilla fc");
