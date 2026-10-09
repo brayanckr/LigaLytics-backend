@@ -87,6 +87,11 @@ public final class ScoreDistribution {
         return sum((h, a) -> h + a >= 3);
     }
 
+    /** Probabilidad de que el total de goles supere la linea (p. ej. 2,5). */
+    public double totalOver(double line) {
+        return sum((h, a) -> h + a > line);
+    }
+
     /** Probabilidad de que marquen ambos equipos. */
     public double bothTeamsScore() {
         return sum((h, a) -> h > 0 && a > 0);
