@@ -513,3 +513,12 @@ logística de Weka). La respuesta indica `winnerSource` (`football-charts` o `mo
 modelo propio, y cada predicción se guarda en la tabla `predictions` con su fuente para poder medir después cuál acierta
 más. Goles, córneres y tarjetas siguen siendo del modelo propio. La API no ofrece probabilidades de partidos ya jugados,
 por lo que su acierto histórico no puede verificarse hacia atrás.
+
+### Marcador y goles coherentes con el ganador
+
+El total de goles esperado `T` se calcula con la forma reciente de ambos equipos, su nivel a largo plazo, la localía y los
+últimos 5 enfrentamientos directos (pesan un 20 % si hay al menos 3); si el modelo externo aporta sus goles esperados, se
+promedian. `ScoreDistribution` reparte `T` entre local y visitante de modo que la matriz de Poisson cumpla
+`P(local) − P(visitante)` igual al del ganador previsto. De esa matriz salen los goles esperados de cada equipo, el marcador
+más probable entre los que cumplen el ganador, el top 5 de marcadores, P(más de 2,5) y P(ambos marcan), todo coherente.
+El endpoint `GET /api/teams/h2h?homeId=&awayId=` devuelve los últimos enfrentamientos con un resumen.
