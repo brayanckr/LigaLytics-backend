@@ -321,6 +321,50 @@ public class EtlService {
                 "sports.bzzoiro.com");
     }
 
+    /**
+     * Guarda los partidos ya finalizados de un calendario externo (football-data.org) que aun no estan en la
+     * base de datos: sirve para mantener al dia la temporada en curso con los goles. La fecha se guarda en
+     * hora de Madrid para coincidir con los CSV de football-data; la comprobacion de existencia admite un dia
+     * de margen para no duplicar partidos al subir despues el CSV.
+     */
+    @Transactional
+    public EtlSummary ingestFinishedFixtures(List<com.ligalytics.fixtures.Fixture> fixtures) {
+        int created = 0;
+        int skipped = 0;
+        Set<Long> affectedTeamIds = new HashSet<>();
+        for (com.ligalytics.fixtures.Fixture fixture : fixtures) {
+            if (!"FINISHED".equals(fixture.status()) || fixture.homeGoals() == null || fixture.awayGoals() == null) {
+                skipped++;
+                continue;
+            }
+            LocalDateTime date = LocalDateTime.ofInstant(fixture.utcDate(), java.time.ZoneId.of("Europe/Madrid"));
+            Team homeTeam = persistenceService.resolveTeam(canonicalName(fixture.homeName()));
+            Team awayTeam = persistenceService.resolveTeam(canonicalName(fixture.awayName()));
+            LocalDate day = date.toLocalDate();
+            if (persistenceService.matchExists(homeTeam.getId(), awayTeam.getId(),
+                    day.minusDays(1).atStartOfDay(), day.plusDays(1).atTime(LocalTime.MAX))) {
+                skipped++;
+                continue;
+            }
+            MatchAnalysis analysis = MatchAnalysis.builder()
+                    .teams(homeTeam.getName(), awayTeam.getName())
+                    .matchDate(date)
+                    .score(fixture.homeGoals(), fixture.awayGoals())
+                    .build();
+            persistenceService.saveAnalysis(analysis, homeTeam, awayTeam);
+            affectedTeamIds.add(homeTeam.getId());
+            affectedTeamIds.add(awayTeam.getId());
+            created++;
+        }
+        String season = fixtures.stream().map(com.ligalytics.fixtures.Fixture::utcDate).max(java.util.Comparator.naturalOrder())
+                .map(i -> com.ligalytics.service.SeasonUtil.code(com.ligalytics.service.SeasonUtil.startYear(
+                        LocalDateTime.ofInstant(i, java.time.ZoneId.of("Europe/Madrid")))))
+                .orElse(null);
+        publishEtlEvent("football-data-org", "calendario", season, affectedTeamIds, created, 0, skipped, "football-data.org");
+        return new EtlSummary("football-data-org", "calendario", fixtures.size(), fixtures.size(), created, 0, skipped,
+                "football-data.org");
+    }
+
     /** Busca el partido por equipos y fecha con un dia de margen (la API usa UTC y los CSV hora local). */
     private Optional<Match> findMatchAround(String homeName, String awayName, String isoDate) {
         if (homeName == null || awayName == null || isoDate == null) {
