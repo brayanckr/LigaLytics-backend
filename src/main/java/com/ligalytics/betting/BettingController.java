@@ -52,10 +52,10 @@ public class BettingController {
     }
 
     public record BettingMatchDto(long eventId, Instant kickoff, String homeTeam, String awayTeam, boolean hasModel,
-            List<OfferDto> offers) {
+            Long homeTeamId, Long awayTeamId, List<OfferDto> offers) {
         static BettingMatchDto of(BoardMatch match) {
             return new BettingMatchDto(match.event().id(), match.event().kickoff(), match.homeName(), match.awayName(),
-                    match.hasModel(), match.offers().stream().map(OfferDto::of).toList());
+                    match.hasModel(), match.homeTeamId(), match.awayTeamId(), match.offers().stream().map(OfferDto::of).toList());
         }
     }
 
