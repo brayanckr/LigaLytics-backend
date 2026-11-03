@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -33,35 +34,41 @@ public class AuthController {
         }
     }
 
-    public record AuthResponse(String token, AccountDto account) {
+    /** El token no va en el cuerpo: viaja solo en la cookie HttpOnly, fuera del alcance del JavaScript. */
+    public record AuthResponse(AccountDto account) {
     }
 
     private final AuthService authService;
     private final UserRepository users;
+    private final AuthCookies cookies;
 
-    public AuthController(AuthService authService, UserRepository users) {
+    public AuthController(AuthService authService, UserRepository users, AuthCookies cookies) {
         this.authService = authService;
         this.users = users;
+        this.cookies = cookies;
     }
 
     @PostMapping("/register")
-    @Operation(summary = "Crea una cuenta con 100 000 COP ficticios")
-    public AuthResponse register(@Valid @RequestBody RegisterRequest request) {
+    @Operation(summary = "Crea una cuenta con 100 000 COP ficticios y abre sesión (cookie HttpOnly)")
+    public AuthResponse register(@Valid @RequestBody RegisterRequest request, HttpServletResponse response) {
         AuthService.AuthResult result = authService.register(request.email(), request.displayName(), request.password());
-        return new AuthResponse(result.token(), AccountDto.of(result.user()));
+        cookies.write(response, result.token());
+        return new AuthResponse(AccountDto.of(result.user()));
     }
 
     @PostMapping("/login")
-    @Operation(summary = "Inicia sesión")
-    public AuthResponse login(@Valid @RequestBody LoginRequest request) {
+    @Operation(summary = "Inicia sesión (cookie HttpOnly)")
+    public AuthResponse login(@Valid @RequestBody LoginRequest request, HttpServletResponse response) {
         AuthService.AuthResult result = authService.login(request.email(), request.password());
-        return new AuthResponse(result.token(), AccountDto.of(result.user()));
+        cookies.write(response, result.token());
+        return new AuthResponse(AccountDto.of(result.user()));
     }
 
     @PostMapping("/logout")
-    @Operation(summary = "Cierra la sesión actual")
-    public void logout(@RequestAttribute(AuthInterceptor.TOKEN_ATTRIBUTE) String token) {
+    @Operation(summary = "Cierra la sesión actual y borra la cookie")
+    public void logout(@RequestAttribute(AuthInterceptor.TOKEN_ATTRIBUTE) String token, HttpServletResponse response) {
         authService.logout(token);
+        cookies.clear(response);
     }
 
     @GetMapping("/me")
