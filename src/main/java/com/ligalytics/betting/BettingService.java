@@ -8,6 +8,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,6 +72,14 @@ public class BettingService {
     private static final Duration SETTLE_AFTER_KICKOFF = Duration.ofHours(2);
     private static final Duration VOID_AFTER = Duration.ofDays(3);
     private static final Logger log = LoggerFactory.getLogger(BettingService.class);
+    static final int PREFETCH_THREADS = 6;
+
+    /** Hilos (daemon) que precargan cuotas; compartidos por todas las peticiones para acotar la carga sobre el proveedor. */
+    private final ExecutorService prefetchPool = Executors.newFixedThreadPool(PREFETCH_THREADS, runnable -> {
+        Thread thread = new Thread(runnable, "odds-prefetch");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final BzzoiroOddsProvider oddsProvider;
     private final TheOddsApiCardsProvider cardsProvider;
@@ -109,14 +120,36 @@ public class BettingService {
     /** Próximos partidos con sus cuotas, probabilidades del modelo y ventaja. */
     @Transactional(readOnly = true)
     public List<BoardMatch> board(int days) {
+        List<OddsEvent> events = oddsProvider.upcoming(Math.max(1, Math.min(days, 14)));
+        prefetchOffers(events);
         List<BoardMatch> board = new ArrayList<>();
-        for (OddsEvent event : oddsProvider.upcoming(Math.max(1, Math.min(days, 14)))) {
+        for (OddsEvent event : events) {
             BoardMatch match = buildBoard(event);
             if (!match.offers().isEmpty()) {
                 board.add(match);
             }
         }
         return board;
+    }
+
+    /**
+     * Pide las cuotas de todos los partidos a la vez (hasta {@link #PREFETCH_THREADS} en paralelo) para que los
+     * proveedores las dejen en su caché. Antes se pedían una por una y con la caché vacía la primera carga tardaba la
+     * suma de todas las llamadas (cada una puede costar segundos): más de lo que espera el navegador. Después,
+     * {@link #buildBoard} lee de la caché. Los proveedores ya aplican tiempos límite y tolerancia a fallos.
+     */
+    private void prefetchOffers(List<OddsEvent> events) {
+        List<CompletableFuture<Void>> pending = events.stream()
+                .map(event -> CompletableFuture.runAsync(() -> {
+                    try {
+                        oddsProvider.odds(event.id());
+                        cardsProvider.cardOdds(event.homeTeam(), event.awayTeam(), event.kickoff());
+                    } catch (RuntimeException ex) {
+                        log.debug("Sin cuotas precargadas para el evento {}: {}", event.id(), ex.getMessage());
+                    }
+                }, prefetchPool))
+                .toList();
+        pending.forEach(CompletableFuture::join);
     }
 
     /** Un partido con todos sus mercados; vacío si ya no está disponible para apostar. */

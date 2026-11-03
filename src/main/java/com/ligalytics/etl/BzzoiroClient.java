@@ -1,6 +1,8 @@
 package com.ligalytics.etl;
 
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -8,13 +10,17 @@ import java.util.OptionalDouble;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ligalytics.exception.ExternalServiceException;
 
 /**
  * Cliente de Bzzoiro Sports Data (sports.bzzoiro.com), API gratuita de fútbol
@@ -30,18 +36,29 @@ public class BzzoiroClient {
     private static final int MAX_RETRIES = 3;
     private static final long PAUSE_MILLIS = 120;
 
+    /** Sin estos límites una respuesta que no llega deja el hilo (y la petición del usuario) colgado para siempre. */
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration READ_TIMEOUT = Duration.ofSeconds(20);
+
     private final ObjectMapper mapper = new ObjectMapper();
     private final String apiKey;
     private final String baseUrl;
     private final int leagueId;
+    private final Duration readTimeout;
 
+    @Autowired
     public BzzoiroClient(
             @Value("${ligalytics.bzzoiro.api-key:}") String apiKey,
             @Value("${ligalytics.bzzoiro.base-url:https://sports.bzzoiro.com/api/v2}") String baseUrl,
             @Value("${ligalytics.bzzoiro.league-id:3}") int leagueId) {
+        this(apiKey, baseUrl, leagueId, READ_TIMEOUT);
+    }
+
+    BzzoiroClient(String apiKey, String baseUrl, int leagueId, Duration readTimeout) {
         this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.baseUrl = baseUrl;
         this.leagueId = leagueId;
+        this.readTimeout = readTimeout;
     }
 
     public boolean isConfigured() {
@@ -124,7 +141,11 @@ public class BzzoiroClient {
     }
 
     private JsonNode get(String path) {
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
+                HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build());
+        factory.setReadTimeout(readTimeout);
         RestClient client = RestClient.builder()
+                .requestFactory(factory)
                 .baseUrl(baseUrl)
                 .defaultHeader("Authorization", "Token " + apiKey)
                 .build();
@@ -133,9 +154,12 @@ public class BzzoiroClient {
                 pause(PAUSE_MILLIS);
                 byte[] body = client.get().uri(path).retrieve().body(byte[].class);
                 return mapper.readTree(new String(body, StandardCharsets.UTF_8));
+            } catch (ResourceAccessException ex) {
+                // Conexión rechazada, DNS o tiempo de espera agotado: se falla rápido en vez de colgar la petición.
+                throw new ExternalServiceException("Bzzoiro no responde (" + path.split("\\?")[0] + ")", ex);
             } catch (HttpClientErrorException.TooManyRequests ex) {
                 if (attempt >= MAX_RETRIES) {
-                    throw new IllegalStateException("Límite de peticiones de Bzzoiro alcanzado: " + ex.getMessage(), ex);
+                    throw new ExternalServiceException("Límite de peticiones de Bzzoiro alcanzado: " + ex.getMessage(), ex);
                 }
                 String retryAfter = ex.getResponseHeaders() == null ? null : ex.getResponseHeaders().getFirst("Retry-After");
                 long seconds = retryAfter == null ? 2 : Math.min(60, Long.parseLong(retryAfter.trim()));

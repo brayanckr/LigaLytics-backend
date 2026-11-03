@@ -111,6 +111,31 @@ class BettingFlowTest {
     }
 
     @Test
+    void theBoardFetchesOddsInParallelSoTheFirstLoadDoesNotAddUpEveryCall() {
+        List<OddsEvent> events = new java.util.ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            events.add(new OddsEvent(800L + i, Instant.now().plus(1, ChronoUnit.DAYS), "Real Madrid", "Barcelona"));
+        }
+        when(oddsProvider.upcoming(anyInt())).thenReturn(events);
+        // Como el proveedor real: la primera petición de cada partido es lenta y las siguientes salen de su caché.
+        java.util.Set<Long> cached = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        when(oddsProvider.odds(anyLong())).thenAnswer(call -> {
+            if (cached.add(call.getArgument(0, Long.class))) {
+                Thread.sleep(300); // lo que tardaría una llamada lenta al proveedor
+            }
+            return List.of(new OddsLine(Market.WINNER, "HOME", null, 2.0, "consenso"));
+        });
+
+        long start = System.nanoTime();
+        List<BettingService.BoardMatch> board = service.board(7);
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+        assertEquals(8, board.size());
+        // Una detrás de otra serían 8 x 300 = 2400 ms como mínimo.
+        assertTrue(elapsedMs < 1600, "las cuotas debían pedirse en paralelo y tardó " + elapsedMs + " ms");
+    }
+
+    @Test
     void placingABetDeductsTheStakeAndFixesTheServerOdds() {
         Bet bet = service.placeBet(userId, 777L, Market.WINNER, "home", null, 10_000);
 
