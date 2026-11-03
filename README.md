@@ -67,6 +67,22 @@ recibe **100.000 COP ficticios**; con sesión (`Authorization: Bearer <token>`) 
 `ADMIN_API_KEY`, `FOOTBALL_DATA_ORG_KEY`, `BZZOIRO_API_KEY`). GitHub Actions (`.github/workflows/ci.yml`) ejecuta las
 pruebas y despliega en cada push a `main`.
 
+**Sesión por cookie.** La sesión viaja en la cookie `HttpOnly` `ligalytics_session`. Si el frontend y el backend están
+en sitios distintos (p. ej. frontend en `*.vercel.app` y backend en `*.up.railway.app`), el navegador **no envía** una
+cookie `SameSite=Lax` entre ellos: el login parece funcionar, pero la siguiente petición llega sin sesión y la app
+muestra «Tu sesión expiró». En ese caso define en Railway:
+
+| Variable | Valor | Para qué |
+|---|---|---|
+| `COOKIE_SAME_SITE` | `None` | La cookie viaja entre sitios (por defecto `Lax`, solo válido si comparten sitio). `None` exige `Secure`. |
+| `COOKIE_SECURE` | `true` (por defecto) | Solo por HTTPS. No lo pongas a `false` junto con `SameSite=None`. |
+| `CORS_ALLOWED_ORIGINS` | URL(s) exactas del frontend, separadas por comas (`https://<app>.vercel.app,http://localhost:5173`) | Sin barra final; no admite `*` porque hay cookies. |
+| `WEBHOOK_SECRET` | secreto largo y aleatorio | Firma HMAC de `POST /api/webhooks/matches`; vacío = el endpoint rechaza todo. |
+
+Los navegadores que bloquean cookies de terceros (Safari, Firefox en modo estricto, Chrome en incógnito) siguen
+descartando la cookie aunque sea `SameSite=None`. Para evitarlo, el frontend puede llamar a `/api` en su propio dominio
+y que Vercel reenvíe esas rutas a Railway (ver el README del frontend).
+
 Notas de producción en Railway: añade un volumen montado en `/app/models` (si no, los modelos entrenados se pierden en
 cada despliegue) y la variable `RAILWAY_RUN_UID=0` (los volúmenes se montan como root y la imagen usa un usuario sin
 privilegios). Con `AUTO_LOAD_DATA=false`, carga los CSV con `POST /api/admin/etl/football-data/upload` (cabecera
