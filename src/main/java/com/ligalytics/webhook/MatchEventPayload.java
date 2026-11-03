@@ -15,8 +15,10 @@ public record MatchEventPayload(
         String homeTeam,
         String awayTeam,
         @Schema(description = "Minuto de juego") Integer minute,
-        Integer homeScore,
-        Integer awayScore,
+        @Schema(description = "Goles del local (marcador actual; en FULL_TIME, el final)") Integer homeScore,
+        @Schema(description = "Goles del visitante (marcador actual; en FULL_TIME, el final)") Integer awayScore,
+        @Schema(description = "Córneres totales del partido; opcional, solo útil en FULL_TIME") Integer corners,
+        @Schema(description = "Tarjetas totales (amarillas + rojas); opcional, solo útil en FULL_TIME") Integer cards,
         @Schema(description = "Momento en que ocurrió el evento") Instant occurredAt) {
 
     /** Un evento es utilizable si identifica el partido y dice qué pasó. */

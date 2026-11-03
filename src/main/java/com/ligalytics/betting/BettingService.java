@@ -336,28 +336,83 @@ public class BettingService {
                     leg.setStatus(BetStatus.VOID);
                 }
             }
-            ParlaySettlement.Result result = ParlaySettlement.resolve(
-                    parlay.getLegs().stream().map(ParlayLeg::getStatus).toList(),
-                    parlay.getLegs().stream().map(ParlayLeg::getOdds).toList());
-            if (result.status() == BetStatus.PENDING) {
-                parlays.save(parlay);
+            if (closeIfResolved(parlay, now)) {
+                settled++;
+            }
+        }
+        return settled;
+    }
+
+    /**
+     * Cierra la combinada (y abona el premio) si el estado de sus selecciones ya decide el resultado; si no,
+     * la guarda tal cual y sigue pendiente.
+     *
+     * @return {@code true} si la combinada quedó liquidada
+     */
+    private boolean closeIfResolved(Parlay parlay, Instant now) {
+        ParlaySettlement.Result result = ParlaySettlement.resolve(
+                parlay.getLegs().stream().map(ParlayLeg::getStatus).toList(),
+                parlay.getLegs().stream().map(ParlayLeg::getOdds).toList());
+        if (result.status() == BetStatus.PENDING) {
+            parlays.save(parlay);
+            return false;
+        }
+        long payout = switch (result.status()) {
+            case WON -> Math.round(parlay.getStake() * result.effectiveOdds());
+            case VOID -> parlay.getStake();
+            default -> 0L;
+        };
+        parlay.setStatus(result.status());
+        parlay.setPayout(payout);
+        parlay.setSettledAt(now);
+        parlays.save(parlay);
+        if (payout > 0) {
+            User user = users.findByIdForUpdate(parlay.getUserId()).orElseThrow();
+            user.setBalance(user.getBalance() + payout);
+            users.save(user);
+        }
+        return true;
+    }
+
+    /**
+     * Liquida con el resultado final de un partido recibido por webhook, sin esperar al ETL ni a la liquidación
+     * periódica. Solo toca apuestas y selecciones <em>pendientes</em> de ese partido cuyo inicio ya pasó, así que
+     * repetir el mismo evento no abona nada dos veces. Córneres y tarjetas solo se liquidan si el evento trae esos
+     * totales; si no, se dejan para la liquidación normal.
+     *
+     * @return número de apuestas y combinadas liquidadas
+     */
+    @Transactional
+    public int settleEvent(long eventId, int homeGoals, int awayGoals, Integer corners, Integer cards) {
+        Instant now = Instant.now();
+        int settled = 0;
+        for (Bet bet : bets.findByStatus(BetStatus.PENDING)) {
+            if (bet.getEventId() != eventId || bet.getKickoff().isAfter(now)) {
                 continue;
             }
-            long payout = switch (result.status()) {
-                case WON -> Math.round(parlay.getStake() * result.effectiveOdds());
-                case VOID -> parlay.getStake();
-                default -> 0L;
-            };
-            parlay.setStatus(result.status());
-            parlay.setPayout(payout);
-            parlay.setSettledAt(now);
-            parlays.save(parlay);
-            if (payout > 0) {
-                User user = users.findByIdForUpdate(parlay.getUserId()).orElseThrow();
-                user.setBalance(user.getBalance() + payout);
-                users.save(user);
+            Optional<BetStatus> outcome = BetSettlement.outcome(bet.getMarket(), bet.getSelection(), bet.getLine(),
+                    homeGoals, awayGoals, corners, cards);
+            if (outcome.isPresent()) {
+                close(bet, outcome.get());
+                settled++;
             }
-            settled++;
+        }
+        for (Parlay parlay : parlays.findByStatus(BetStatus.PENDING)) {
+            boolean touched = false;
+            for (ParlayLeg leg : parlay.getLegs()) {
+                if (leg.getStatus() != BetStatus.PENDING || leg.getEventId() != eventId || leg.getKickoff().isAfter(now)) {
+                    continue;
+                }
+                Optional<BetStatus> outcome = BetSettlement.outcome(leg.getMarket(), leg.getSelection(), leg.getLine(),
+                        homeGoals, awayGoals, corners, cards);
+                if (outcome.isPresent()) {
+                    leg.setStatus(outcome.get());
+                    touched = true;
+                }
+            }
+            if (touched && closeIfResolved(parlay, now)) {
+                settled++;
+            }
         }
         return settled;
     }
