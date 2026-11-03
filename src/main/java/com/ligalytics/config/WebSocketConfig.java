@@ -22,7 +22,8 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
  * Canal en vivo por WebSocket con STOMP.
  *
  * <ul>
- *   <li>Los clientes se conectan a {@code /api/ws} (el prefijo {@code /api} es el context-path) y se suscriben a
+ *   <li>Los clientes web se conectan con SockJS a {@code /api/ws} (el prefijo {@code /api} es el context-path) y
+ *       los WebSocket nativos a {@code /api/ws/websocket}; después se suscriben a
  *       {@value #LIVE_MATCHES_TOPIC}.</li>
  *   <li>Solo el servidor emite: cuando llega un webhook autenticado se retransmite el evento al tópico.</li>
  *   <li>Solo se aceptan conexiones desde los orígenes de {@code ligalytics.cors.allowed-origins}, los mismos
@@ -53,7 +54,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        registry.addEndpoint("/ws").setAllowedOrigins(allowedOrigins);
+        // SockJS para el cliente web (sockjs-client); los clientes WebSocket nativos usan /api/ws/websocket.
+        registry.addEndpoint("/ws").setAllowedOrigins(allowedOrigins).withSockJS();
     }
 
     @Override

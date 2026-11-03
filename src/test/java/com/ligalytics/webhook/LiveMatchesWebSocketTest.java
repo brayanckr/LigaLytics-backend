@@ -89,7 +89,7 @@ class LiveMatchesWebSocketTest {
     private StompSession connect(String origin) throws Exception {
         WebSocketHttpHeaders headers = new WebSocketHttpHeaders();
         headers.setOrigin(origin);
-        return stompClient.connectAsync("ws://localhost:" + port + "/api/ws", headers, new StompSessionHandlerAdapter() {
+        return stompClient.connectAsync("ws://localhost:" + port + "/api/ws/websocket", headers, new StompSessionHandlerAdapter() {
         }).get(5, TimeUnit.SECONDS);
     }
 
@@ -173,6 +173,23 @@ class LiveMatchesWebSocketTest {
         ExecutionException error = assertThrows(ExecutionException.class, () -> connect("http://sitio-malicioso.example"));
         // 403 y no otro error (un 404 también lanzaría excepción y ocultaría que el endpoint no existe).
         assertTrue(String.valueOf(error.getCause().getMessage()).contains("403"), String.valueOf(error.getCause()));
+    }
+
+    @Test
+    void theSockJsInfoEndpointAnswersTheBrowserClientForAllowedOriginsOnly() {
+        HttpHeaders allowed = new HttpHeaders();
+        allowed.setOrigin("http://localhost:5173");
+        ResponseEntity<String> ok = rest.exchange("/ws/info", org.springframework.http.HttpMethod.GET,
+                new HttpEntity<>(allowed), String.class);
+        assertEquals(HttpStatus.OK, ok.getStatusCode());
+        assertTrue(ok.getBody().contains("websocket"));
+        assertEquals("http://localhost:5173", ok.getHeaders().getFirst("Access-Control-Allow-Origin"));
+
+        HttpHeaders evil = new HttpHeaders();
+        evil.setOrigin("http://sitio-malicioso.example");
+        ResponseEntity<String> refused = rest.exchange("/ws/info", org.springframework.http.HttpMethod.GET,
+                new HttpEntity<>(evil), String.class);
+        assertEquals(HttpStatus.FORBIDDEN, refused.getStatusCode());
     }
 
     @Test
