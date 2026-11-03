@@ -26,6 +26,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.ligalytics.webhook.LiveMatchBroadcaster;
 import com.ligalytics.webhook.MatchEventReceived;
 import com.ligalytics.webhook.WebhookSignatureVerifier;
 
@@ -38,14 +39,16 @@ class WebhookControllerTest {
                     + "\"minute\":34,\"homeScore\":1,\"awayScore\":0,\"campoDesconocido\":true}";
 
     private ApplicationEventPublisher events;
+    private LiveMatchBroadcaster broadcaster;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         events = mock(ApplicationEventPublisher.class);
+        broadcaster = mock(LiveMatchBroadcaster.class);
         WebhookSignatureVerifier verifier = new WebhookSignatureVerifier(SECRET, Duration.ofMinutes(5));
         ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        mockMvc = MockMvcBuilders.standaloneSetup(new WebhookController(verifier, mapper, events))
+        mockMvc = MockMvcBuilders.standaloneSetup(new WebhookController(verifier, mapper, events, broadcaster))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -76,6 +79,32 @@ class WebhookControllerTest {
         verify(events).publishEvent(captor.capture());
         assertEquals("512", captor.getValue().payload().eventId());
         assertEquals("GOAL", captor.getValue().payload().type());
+        // Tras procesarlo se emite al canal en vivo exactamente el mismo evento.
+        verify(broadcaster).broadcast(captor.getValue().payload());
+    }
+
+    @Test
+    void doesNotBroadcastWhatWasRejected() throws Exception {
+        mockMvc.perform(post("/webhooks/matches").contentType(MediaType.APPLICATION_JSON).content(BODY))
+                .andExpect(status().isUnauthorized());
+
+        verify(broadcaster, never()).broadcast(any());
+    }
+
+    @Test
+    void doesNotBroadcastWhenProcessingTheEventFails() throws Exception {
+        String ts = now();
+        org.mockito.Mockito.doThrow(new IllegalArgumentException("El evento FULL_TIME debe incluir homeScore"))
+                .when(events).publishEvent(any(Object.class));
+
+        mockMvc.perform(post("/webhooks/matches")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Webhook-Timestamp", ts)
+                        .header("X-Webhook-Signature", sign(SECRET, ts, BODY))
+                        .content(BODY))
+                .andExpect(status().isBadRequest());
+
+        verify(broadcaster, never()).broadcast(any());
     }
 
     @Test
@@ -156,7 +185,7 @@ class WebhookControllerTest {
     @Test
     void rejectsEverythingWhenNoSecretIsConfigured() throws Exception {
         WebhookSignatureVerifier unconfigured = new WebhookSignatureVerifier("", Duration.ofMinutes(5));
-        MockMvc open = MockMvcBuilders.standaloneSetup(new WebhookController(unconfigured, new ObjectMapper(), events))
+        MockMvc open = MockMvcBuilders.standaloneSetup(new WebhookController(unconfigured, new ObjectMapper(), events, broadcaster))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
         String ts = now();

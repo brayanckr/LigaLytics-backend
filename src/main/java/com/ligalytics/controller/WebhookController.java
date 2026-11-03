@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ligalytics.webhook.LiveMatchBroadcaster;
 import com.ligalytics.webhook.MatchEventPayload;
 import com.ligalytics.webhook.MatchEventReceived;
 import com.ligalytics.webhook.WebhookSignatureVerifier;
@@ -31,6 +32,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
  * <p>El endpoint es público a nivel de red, así que la autenticidad se garantiza con una firma HMAC-SHA256 del
  * cuerpo y una marca de tiempo (ver {@link WebhookSignatureVerifier}). El cuerpo se recibe como bytes crudos
  * porque la firma se calcula sobre ellos; solo se interpreta como JSON <em>después</em> de verificarla.</p>
+ *
+ * <p>Una vez procesado el evento (liquidación de apuestas incluida) se retransmite por WebSocket a
+ * {@code /topic/live-matches} para que los clientes actualicen marcador y estadísticas al momento.</p>
  */
 @RestController
 @RequestMapping(value = "/webhooks", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -45,11 +49,14 @@ public class WebhookController {
     private final WebhookSignatureVerifier verifier;
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher events;
+    private final LiveMatchBroadcaster broadcaster;
 
-    public WebhookController(WebhookSignatureVerifier verifier, ObjectMapper objectMapper, ApplicationEventPublisher events) {
+    public WebhookController(WebhookSignatureVerifier verifier, ObjectMapper objectMapper,
+            ApplicationEventPublisher events, LiveMatchBroadcaster broadcaster) {
         this.verifier = verifier;
         this.objectMapper = objectMapper;
         this.events = events;
+        this.broadcaster = broadcaster;
     }
 
     @PostMapping(value = "/matches", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -83,7 +90,9 @@ public class WebhookController {
         }
 
         log.info("Evento en vivo recibido: partido={} tipo={} minuto={}", payload.eventId(), payload.type(), payload.minute());
+        // Si el procesamiento falla (p. ej. un FULL_TIME sin marcador) la excepción corta aquí y no se emite nada.
         events.publishEvent(new MatchEventReceived(payload));
+        broadcaster.broadcast(payload);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(Map.of("status", "accepted"));
     }
 
