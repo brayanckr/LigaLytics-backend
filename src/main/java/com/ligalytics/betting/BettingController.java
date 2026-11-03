@@ -137,14 +137,14 @@ public class BettingController {
 
     @GetMapping("/recommendations")
     @Operation(summary = "Selecciones con ventaja según el modelo (no demostrada), con importe sugerido")
-    public List<RecommendationDto> recommendations(@RequestAttribute(AuthInterceptor.USER_ATTRIBUTE) User user) {
+    public List<RecommendationDto> recommendations(@RequestAttribute(AuthInterceptor.USER_ID_ATTRIBUTE) Long userId) {
         requireOdds();
-        return service.recommendations(user).stream().map(RecommendationDto::of).toList();
+        return service.recommendations(userId).stream().map(RecommendationDto::of).toList();
     }
 
     @PostMapping("/bets")
     @Operation(summary = "Hace una apuesta con saldo ficticio (la cuota la fija el servidor)")
-    public BetDto place(@RequestAttribute(AuthInterceptor.USER_ATTRIBUTE) User user,
+    public BetDto place(@RequestAttribute(AuthInterceptor.USER_ID_ATTRIBUTE) Long userId,
             @Valid @RequestBody PlaceBetRequest request) {
         requireOdds();
         Market market;
@@ -153,13 +153,13 @@ public class BettingController {
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException("Mercado no válido: " + request.market());
         }
-        return BetDto.of(service.placeBet(user.getId(), request.eventId(), market, request.selection().trim(),
+        return BetDto.of(service.placeBet(userId, request.eventId(), market, request.selection().trim(),
                 request.line(), request.stake()));
     }
 
     @PostMapping("/parlays")
     @Operation(summary = "Hace una apuesta combinada (parlay) con saldo ficticio: la cuota total es el producto de las cuotas")
-    public ParlayDto placeParlay(@RequestAttribute(AuthInterceptor.USER_ATTRIBUTE) User user,
+    public ParlayDto placeParlay(@RequestAttribute(AuthInterceptor.USER_ID_ATTRIBUTE) Long userId,
             @Valid @RequestBody PlaceParlayRequest request) {
         requireOdds();
         List<BettingService.LegRequest> legs = request.legs().stream().map(l -> {
@@ -170,32 +170,32 @@ public class BettingController {
                 throw new IllegalArgumentException("Mercado no válido: " + l.market());
             }
         }).toList();
-        return ParlayDto.of(service.placeParlay(user.getId(), request.stake(), legs));
+        return ParlayDto.of(service.placeParlay(userId, request.stake(), legs));
     }
 
     @GetMapping("/parlays")
     @Operation(summary = "Historial de combinadas de la cuenta")
-    public List<ParlayDto> parlays(@RequestAttribute(AuthInterceptor.USER_ATTRIBUTE) User user) {
-        return service.parlaysOf(user.getId()).stream().map(ParlayDto::of).toList();
+    public List<ParlayDto> parlays(@RequestAttribute(AuthInterceptor.USER_ID_ATTRIBUTE) Long userId) {
+        return service.parlaysOf(userId).stream().map(ParlayDto::of).toList();
     }
 
     @GetMapping("/bets")
     @Operation(summary = "Historial de apuestas de la cuenta")
-    public List<BetDto> bets(@RequestAttribute(AuthInterceptor.USER_ATTRIBUTE) User user) {
-        return service.betsOf(user.getId()).stream().map(BetDto::of).toList();
+    public List<BetDto> bets(@RequestAttribute(AuthInterceptor.USER_ID_ATTRIBUTE) Long userId) {
+        return service.betsOf(userId).stream().map(BetDto::of).toList();
     }
 
     @GetMapping("/wallet")
     @Operation(summary = "Saldo ficticio, dinero en juego y ganancia o pérdida")
-    public WalletDto wallet(@RequestAttribute(AuthInterceptor.USER_ATTRIBUTE) User user) {
-        return walletOf(user.getId());
+    public WalletDto wallet(@RequestAttribute(AuthInterceptor.USER_ID_ATTRIBUTE) Long userId) {
+        return walletOf(userId);
     }
 
     @PostMapping("/wallet/reset")
     @Operation(summary = "Reinicia el saldo a 100 000 COP ficticios y borra las apuestas")
-    public WalletDto reset(@RequestAttribute(AuthInterceptor.USER_ATTRIBUTE) User user) {
-        service.resetWallet(user.getId());
-        return walletOf(user.getId());
+    public WalletDto reset(@RequestAttribute(AuthInterceptor.USER_ID_ATTRIBUTE) Long userId) {
+        service.resetWallet(userId);
+        return walletOf(userId);
     }
 
     private WalletDto walletOf(Long userId) {

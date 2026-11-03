@@ -20,8 +20,9 @@ import jakarta.servlet.http.HttpServletResponse;
  * <ul>
  *   <li>Sin cookie, o con una cookie que no corresponde a una sesión vigente, aborta con 401 (y, si había cookie,
  *       ordena al navegador que la borre).</li>
- *   <li>Con sesión válida deja el id del usuario en {@code request.setAttribute("userId", id)}, y también el
- *       usuario y el token en {@link #USER_ATTRIBUTE} y {@link #TOKEN_ATTRIBUTE} para los controladores existentes.</li>
+ *   <li>Con sesión válida deja el id del usuario en {@code request.setAttribute("userId", id)} (y el token en
+ *       {@link #TOKEN_ATTRIBUTE}, para el cierre de sesión). Los controladores de rutas protegidas reciben el id
+ *       con {@code @RequestAttribute("userId") Long userId} y no vuelven a comprobar nada.</li>
  *   <li>Como el navegador adjunta la cookie por sí solo, las peticiones que modifican datos deben llevar además la
  *       cabecera {@code X-Requested-With}: un formulario de otro sitio no puede añadirla y un {@code fetch} desde
  *       otro origen necesita pasar el CORS, que solo permite los orígenes configurados. Sin ella, 403.</li>
@@ -30,9 +31,9 @@ import jakarta.servlet.http.HttpServletResponse;
 @Component
 public class AuthInterceptor implements HandlerInterceptor {
 
-    /** Id ({@link Long}) del usuario autenticado. */
+    /** Id ({@link Long}) del usuario autenticado: los controladores lo piden con {@code @RequestAttribute("userId")}. */
     public static final String USER_ID_ATTRIBUTE = "userId";
-    public static final String USER_ATTRIBUTE = "ligalytics.user";
+    /** Token de la sesión actual; solo lo necesita el cierre de sesión para borrar esa sesión. */
     public static final String TOKEN_ATTRIBUTE = "ligalytics.token";
     /** Cabecera que prueba que la petición la hizo código del propio frontend y no un formulario ajeno. */
     public static final String CSRF_HEADER = "X-Requested-With";
@@ -67,7 +68,6 @@ public class AuthInterceptor implements HandlerInterceptor {
             }
         }
         request.setAttribute(USER_ID_ATTRIBUTE, user.get().getId());
-        request.setAttribute(USER_ATTRIBUTE, user.get());
         request.setAttribute(TOKEN_ATTRIBUTE, token);
         return true;
     }

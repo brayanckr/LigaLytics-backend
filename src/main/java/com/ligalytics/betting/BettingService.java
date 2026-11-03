@@ -127,8 +127,8 @@ public class BettingService {
 
     /** Las mejores ventajas del modelo frente a las cuotas, con un importe sugerido (¼ de Kelly, máximo 5 % del saldo). */
     @Transactional(readOnly = true)
-    public List<Recommendation> recommendations(User user) {
-        long balance = users.findById(user.getId()).map(User::getBalance).orElse(0L);
+    public List<Recommendation> recommendations(Long userId) {
+        long balance = users.findById(userId).map(User::getBalance).orElse(0L);
         List<Recommendation> result = new ArrayList<>();
         for (BoardMatch match : board(7)) {
             for (Offer offer : match.offers()) {

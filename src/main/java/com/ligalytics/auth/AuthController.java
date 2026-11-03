@@ -8,6 +8,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.ligalytics.exception.UnauthorizedException;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -73,7 +75,9 @@ public class AuthController {
 
     @GetMapping("/me")
     @Operation(summary = "Cuenta de la sesión actual, con el saldo ficticio")
-    public AccountDto me(@RequestAttribute(AuthInterceptor.USER_ATTRIBUTE) User user) {
-        return AccountDto.of(users.findById(user.getId()).orElse(user));
+    public AccountDto me(@RequestAttribute(AuthInterceptor.USER_ID_ATTRIBUTE) Long userId) {
+        // Se vuelve a leer para devolver el saldo actual; si la cuenta ya no existe, la sesión tampoco vale.
+        return AccountDto.of(users.findById(userId)
+                .orElseThrow(() -> new UnauthorizedException("Inicia sesión para continuar")));
     }
 }
