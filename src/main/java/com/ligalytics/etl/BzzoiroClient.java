@@ -39,6 +39,8 @@ public class BzzoiroClient {
     /** Sin estos límites una respuesta que no llega deja el hilo (y la petición del usuario) colgado para siempre. */
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(20);
+    /** Para /odds/, que el proveedor calcula bajo demanda (medido: 15-90 s la primera vez); solo en segundo plano. */
+    private static final Duration SLOW_READ_TIMEOUT = Duration.ofSeconds(120);
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final String apiKey;
@@ -117,10 +119,22 @@ public class BzzoiroClient {
         return events;
     }
 
-    /** Filas de cuotas (consenso de casas) de un partido. */
+    /**
+     * Resumen de cuotas de consenso de un partido (1X2, goles 1,5/2,5/3,5 y ambos marcan): respuesta en menos de un
+     * segundo, pero sin córners. Devuelve el objeto {@code odds} (vacío si el proveedor aún no tiene cuotas).
+     */
+    public JsonNode eventOdds(long eventId) {
+        return get("/events/" + eventId + "/odds/").path("odds");
+    }
+
+    /**
+     * Todas las filas de cuotas (consenso de casas, por mercado) de un partido; es la única fuente de los córners.
+     * El proveedor las calcula bajo demanda y la primera consulta de un partido tarda de 15 a 90 s, así que solo debe
+     * usarse en segundo plano y con un tiempo de lectura largo, nunca dentro de una petición de un usuario.
+     */
     public List<JsonNode> oddsRows(long eventId) {
         List<JsonNode> rows = new ArrayList<>();
-        get("/odds/?event_id=" + eventId + "&limit=100").path("results").forEach(rows::add);
+        get("/odds/?event_id=" + eventId + "&limit=100", SLOW_READ_TIMEOUT).path("results").forEach(rows::add);
         return rows;
     }
 
@@ -141,9 +155,13 @@ public class BzzoiroClient {
     }
 
     private JsonNode get(String path) {
+        return get(path, readTimeout);
+    }
+
+    private JsonNode get(String path, Duration timeout) {
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
                 HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build());
-        factory.setReadTimeout(readTimeout);
+        factory.setReadTimeout(timeout);
         RestClient client = RestClient.builder()
                 .requestFactory(factory)
                 .baseUrl(baseUrl)
