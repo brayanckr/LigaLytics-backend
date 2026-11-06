@@ -120,6 +120,17 @@ public class BzzoiroClient {
     }
 
     /**
+     * Partidos de LaLiga en su ventana de juego (de 5 min antes del inicio a ~10 min tras el pitido final), con
+     * estado ({@code notstarted|delayed|inprogress|penalties|finished}), periodo, minuto y marcador. El proveedor
+     * lo cachea 30 s, así que consultarlo más a menudo no da datos más frescos.
+     */
+    public List<JsonNode> liveEvents() {
+        List<JsonNode> events = new ArrayList<>();
+        get("/events/live/?league_id=" + leagueId + "&limit=50").path("events").forEach(events::add);
+        return events;
+    }
+
+    /**
      * Resumen de cuotas de consenso de un partido (1X2, goles 1,5/2,5/3,5 y ambos marcan): respuesta en menos de un
      * segundo, pero sin córners. Devuelve el objeto {@code odds} (vacío si el proveedor aún no tiene cuotas).
      */

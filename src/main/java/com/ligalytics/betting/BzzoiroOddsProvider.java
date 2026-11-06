@@ -46,6 +46,8 @@ public class BzzoiroOddsProvider {
     private final Map<Long, Cached<List<OddsLine>>> summaryCache = new ConcurrentHashMap<>();
     private final Map<Long, Cached<List<OddsLine>>> cornersCache = new ConcurrentHashMap<>();
     private final Set<Long> cornersInFlight = ConcurrentHashMap.newKeySet();
+    /** Horario de inicio de cada partido visto, para saber cuándo hay uno en juego (ver {@link #hasMatchInLiveWindow}). */
+    private final Map<Long, Instant> kickoffs = new ConcurrentHashMap<>();
     /** Hilos (daemon) para la ruta lenta de córners: pocos, para no saturar al proveedor. */
     private final ExecutorService background = Executors.newFixedThreadPool(3, runnable -> {
         Thread thread = new Thread(runnable, "odds-corners");
@@ -77,11 +79,26 @@ public class BzzoiroOddsProvider {
                 }
             }
             events.sort(java.util.Comparator.comparing(OddsEvent::kickoff));
+            events.forEach(event -> kickoffs.put(event.id(), event.kickoff()));
             cached = new Cached<>(events, Instant.now().plus(TTL));
             eventsCache = cached;
         }
         Instant limit = Instant.now().plus(Duration.ofDays(days));
         return cached.value().stream().filter(e -> e.kickoff().isBefore(limit)).toList();
+    }
+
+    /**
+     * Si algún partido conocido está ahora en su ventana de juego (de 10 minutos antes del inicio a 3 horas y media
+     * después). Solo mira la caché de partidos, nunca llama al proveedor: sirve para consultar el directo solo cuando
+     * puede haber algo que ver.
+     */
+    public boolean hasMatchInLiveWindow() {
+        Instant now = Instant.now();
+        // La lista se pide con estado «notstarted»: un partido que ya empezó sale de ella al refrescarla, por eso los
+        // horarios vistos se recuerdan aparte durante unas horas.
+        kickoffs.values().removeIf(kickoff -> kickoff.isBefore(now.minus(Duration.ofHours(6))));
+        return kickoffs.values().stream().anyMatch(kickoff ->
+                kickoff.isBefore(now.plus(Duration.ofMinutes(10))) && kickoff.isAfter(now.minus(Duration.ofMinutes(210))));
     }
 
     /**
