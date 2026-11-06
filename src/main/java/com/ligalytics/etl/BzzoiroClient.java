@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -194,6 +195,11 @@ public class BzzoiroClient {
                 long seconds = retryAfter == null ? 2 : Math.min(60, Long.parseLong(retryAfter.trim()));
                 log.warn("Bzzoiro 429: esperando {} s", seconds);
                 pause(seconds * 1000);
+            } catch (RestClientResponseException ex) {
+                // 5xx (p. ej. el 526 de Cloudflare cuando el servidor de Bzzoiro cae) u otro error HTTP: el proveedor no
+                // está disponible; se informa como tal (503) en lugar de un 500 con el error crudo.
+                throw new ExternalServiceException("Bzzoiro respondió " + ex.getStatusCode().value() + " ("
+                        + path.split("\\?")[0] + ")", ex);
             } catch (java.io.IOException ex) {
                 throw new IllegalStateException("Respuesta no válida de Bzzoiro", ex);
             }

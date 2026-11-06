@@ -80,6 +80,26 @@ class BzzoiroClientTimeoutTest {
     }
 
     @Test
+    void aProviderErrorStatusLikeCloudflare526IsReportedAsAnExternalServiceError() throws Exception {
+        server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        server.createContext("/", exchange -> {
+            byte[] bytes = "error code: 526".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(526, bytes.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(bytes);
+            }
+        });
+        server.start();
+        BzzoiroClient client = new BzzoiroClient("clave", "http://localhost:" + server.getAddress().getPort(), 3,
+                Duration.ofSeconds(5));
+
+        ExternalServiceException error = assertThrows(ExternalServiceException.class,
+                () -> client.upcomingEvents(LocalDate.now(), LocalDate.now().plusDays(7)));
+
+        assertTrue(error.getMessage().contains("526"));
+    }
+
+    @Test
     void aNormalResponseIsStillRead() throws Exception {
         BzzoiroClient client = new BzzoiroClient("clave",
                 serve(0, "{\"results\":[{\"id\":7,\"home_team\":\"Real Madrid\"}],\"next\":null}"), 3, Duration.ofSeconds(5));
