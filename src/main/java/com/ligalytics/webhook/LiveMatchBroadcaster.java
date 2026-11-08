@@ -19,6 +19,16 @@ public class LiveMatchBroadcaster {
         this.messaging = messaging;
     }
 
+    /** Avisa a los clientes de que la clasificación cambió para que la vuelvan a pedir. */
+    public void broadcastRankingChanged() {
+        try {
+            messaging.convertAndSend(WebSocketConfig.RANKING_TOPIC,
+                    java.util.Map.of("changedAt", java.time.Instant.now().toString()));
+        } catch (RuntimeException ex) {
+            log.warn("No se pudo avisar del cambio de clasificación: {}", ex.getMessage());
+        }
+    }
+
     /**
      * Emite el evento a los suscriptores. Un fallo al emitir no debe hacer fallar el webhook: el evento ya se
      * procesó (p. ej. se liquidaron apuestas) y el proveedor no debe reintentarlo por un problema del canal en vivo.

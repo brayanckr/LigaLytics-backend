@@ -365,6 +365,37 @@ public class EtlService {
                 "football-data.org");
     }
 
+    /**
+     * Guarda el resultado final de un partido que acaba de terminar (evento FULL_TIME del directo) para que la
+     * clasificacion lo refleje al instante, sin esperar a la sincronizacion periodica del calendario. Es
+     * idempotente: si el partido ya esta (p. ej. lo guardo antes el calendario) no hace nada.
+     *
+     * @return {@code true} si se guardo un partido nuevo
+     */
+    @Transactional
+    public boolean ingestFinishedMatch(String homeName, String awayName, int homeGoals, int awayGoals) {
+        if (!StringUtils.hasText(homeName) || !StringUtils.hasText(awayName) || homeGoals < 0 || awayGoals < 0) {
+            return false;
+        }
+        LocalDateTime date = LocalDateTime.now(java.time.ZoneId.of("Europe/Madrid"));
+        Team homeTeam = persistenceService.resolveTeam(canonicalName(homeName));
+        Team awayTeam = persistenceService.resolveTeam(canonicalName(awayName));
+        LocalDate day = date.toLocalDate();
+        if (persistenceService.matchExists(homeTeam.getId(), awayTeam.getId(),
+                day.minusDays(1).atStartOfDay(), day.plusDays(1).atTime(LocalTime.MAX))) {
+            return false;
+        }
+        persistenceService.saveAnalysis(MatchAnalysis.builder()
+                .teams(homeTeam.getName(), awayTeam.getName())
+                .matchDate(date)
+                .score(homeGoals, awayGoals)
+                .build(), homeTeam, awayTeam);
+        publishEtlEvent("live-feed", "full-time", com.ligalytics.service.SeasonUtil.code(
+                com.ligalytics.service.SeasonUtil.startYear(date)), Set.of(homeTeam.getId(), awayTeam.getId()), 1, 0, 0,
+                "directo");
+        return true;
+    }
+
     /** Busca el partido por equipos y fecha con un dia de margen (la API usa UTC y los CSV hora local). */
     private Optional<Match> findMatchAround(String homeName, String awayName, String isoDate) {
         if (homeName == null || awayName == null || isoDate == null) {

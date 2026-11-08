@@ -76,6 +76,20 @@ class CurrentSeasonIngestionTest {
     }
 
     @Test
+    void liveFullTimeSavesTheMatchOnceAndShowsUpInTheRanking() throws Exception {
+        assertEquals(true, etlService.ingestFinishedMatch("Real Madrid CF", "Villarreal CF", 3, 1));
+        // Un segundo FULL_TIME (reintento del proveedor) o el calendario despues no duplican el partido.
+        assertEquals(false, etlService.ingestFinishedMatch("Real Madrid CF", "Villarreal CF", 3, 1));
+        assertEquals(false, etlService.ingestFinishedMatch("Real Madrid CF", "", 3, 1));
+        assertEquals(1, matchRepository.count());
+
+        mockMvc.perform(get("/ranking"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].points", is(3)));
+    }
+
+    @Test
     void recentMatchesMixSeasonsNewestFirst() throws Exception {
         etlService.ingestFinishedFixtures(List.of(
                 fixture("1", "Real Madrid", "Barcelona", "2025-04-05T19:00:00Z", "FINISHED", 2, 1),

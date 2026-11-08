@@ -41,6 +41,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     /** Tópico al que se emiten las actualizaciones de marcador y estadísticas. */
     public static final String LIVE_MATCHES_TOPIC = "/topic/live-matches";
 
+    /** Tópico que avisa de que la clasificación cambió (un partido terminó y se guardó). */
+    public static final String RANKING_TOPIC = "/topic/ranking";
+
     private static final Logger log = LoggerFactory.getLogger(WebSocketConfig.class);
 
     private final String[] allowedOrigins;
