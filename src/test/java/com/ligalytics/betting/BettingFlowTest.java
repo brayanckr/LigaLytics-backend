@@ -230,6 +230,67 @@ class BettingFlowTest {
     }
 
     @Test
+    void aSameMatchParlayIsAllowedAndPaysLessThanTheProductOfItsOdds() {
+        when(oddsProvider.odds(anyLong())).thenReturn(List.of(
+                new OddsLine(Market.BTTS, "YES", null, 1.8, "consenso"),
+                new OddsLine(Market.BTTS, "NO", null, 1.95, "consenso"),
+                new OddsLine(Market.GOALS, "OVER", 2.5, 1.9, "consenso"),
+                new OddsLine(Market.GOALS, "UNDER", 2.5, 1.9, "consenso")));
+        List<BettingService.LegRequest> legs = List.of(
+                new BettingService.LegRequest(777L, Market.BTTS, "YES", null),
+                new BettingService.LegRequest(777L, Market.GOALS, "OVER", 2.5));
+
+        BettingService.ParlayQuote quote = service.quoteParlay(legs);
+        Parlay parlay = service.placeParlay(userId, 10_000, legs);
+
+        // Ambos marcan y más de 2,5 se favorecen: paga menos que 1,8 x 1,9 = 3,42, pero más que cualquiera sola.
+        assertTrue(parlay.getTotalOdds() < 3.42, "total " + parlay.getTotalOdds());
+        assertTrue(parlay.getTotalOdds() > 1.9, "total " + parlay.getTotalOdds());
+        assertEquals(parlay.getTotalOdds(), quote.totalOdds(), 1e-9);
+        assertTrue(quote.correlationAdjustment() > 1.0);
+        // La cuota total queda repartida en las selecciones: su producto es la cuota total.
+        double product = parlay.getLegs().stream().mapToDouble(leg -> leg.getOdds()).reduce(1.0, (a, b) -> a * b);
+        assertEquals(parlay.getTotalOdds(), product, 0.02);
+        assertEquals(90_000L, balance());
+
+        // Ambos marcan y menos de 2,5 se oponen (solo vale el 1-1): paga más que el producto 1,8 x 1,9.
+        BettingService.ParlayQuote opposed = service.quoteParlay(List.of(
+                new BettingService.LegRequest(777L, Market.BTTS, "YES", null),
+                new BettingService.LegRequest(777L, Market.GOALS, "UNDER", 2.5)));
+        assertTrue(opposed.totalOdds() > 3.42, "total " + opposed.totalOdds());
+
+        // Las que se contradicen o se implican siguen rechazadas, también al cotizar.
+        assertThrows(IllegalArgumentException.class, () -> service.quoteParlay(List.of(
+                new BettingService.LegRequest(777L, Market.BTTS, "YES", null),
+                new BettingService.LegRequest(777L, Market.BTTS, "NO", null))));
+    }
+
+    @Test
+    void aWonSameMatchParlayPaysTheQuotedOdds() {
+        when(oddsProvider.odds(anyLong())).thenReturn(List.of(
+                new OddsLine(Market.BTTS, "YES", null, 1.8, "consenso"),
+                new OddsLine(Market.GOALS, "OVER", 2.5, 1.9, "consenso")));
+        Parlay parlay = service.placeParlay(userId, 10_000, List.of(
+                new BettingService.LegRequest(777L, Market.BTTS, "YES", null),
+                new BettingService.LegRequest(777L, Market.GOALS, "OVER", 2.5)));
+        Instant played = Instant.now().minus(3, ChronoUnit.HOURS);
+        parlay.getLegs().forEach(leg -> leg.setKickoff(played));
+        parlays.save(parlay);
+        Team madrid = teamRepository.findByNameIgnoreCase("Real Madrid").orElseThrow();
+        Team barcelona = teamRepository.findByNameIgnoreCase("Barcelona").orElseThrow();
+        // 2-2: marcan los dos y hay más de 2,5 goles.
+        matchRepository.save(Match.builder().matchDate(LocalDateTime.ofInstant(played, ZoneId.of("Europe/Madrid")))
+                .homeTeam(madrid).awayTeam(barcelona).fullTimeHomeGoals(2).fullTimeAwayGoals(2).corners(10)
+                .yellowCards(3).redCards(0).build());
+
+        assertEquals(1, service.settlePending());
+
+        assertEquals(BetStatus.WON, parlays.findById(parlay.getId()).orElseThrow().getStatus());
+        // 90 000 + 10 000 x cuota total (con 2 decimales de margen por el reparto entre selecciones)
+        assertEquals(90_000.0 + 10_000.0 * parlay.getTotalOdds(), (double) balance(), 150.0);
+    }
+
+    @Test
     void invalidParlaysAreRejectedWithoutTouchingTheBalance() {
         secondEvent();
         BettingService.LegRequest winner = new BettingService.LegRequest(777L, Market.WINNER, "HOME", null);
@@ -271,7 +332,7 @@ class BettingFlowTest {
         for (List<BettingService.LegRequest> pair : sameMatchPairs) {
             IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                     () -> service.placeParlay(userId, 5_000, pair));
-            assertTrue(error.getMessage().startsWith("No se pueden combinar selecciones incompatibles del mismo partido"));
+            assertTrue(error.getMessage().startsWith("No se pueden combinar dos selecciones del mismo partido que se contradicen"));
             // Tampoco con una tercera selección válida de otro partido.
             List<BettingService.LegRequest> withThird = new java.util.ArrayList<>(pair);
             withThird.add(other);

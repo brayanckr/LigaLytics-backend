@@ -239,45 +239,64 @@ public class BettingService {
     }
 
     /**
-     * Indica si dos selecciones del mismo partido son incompatibles en una combinada: o se contradicen o una implica
-     * a la otra, de modo que multiplicar sus cuotas inflaría la cuota total. Son incompatibles las del mismo mercado
-     * (Sí/No de ambos marcan, más/menos de goles, dos resultados 1X2, la misma selección repetida) y las de ambos
-     * marcan con las de goles (ambos marcan «Sí» ya implica al menos 2 goles). Partidos distintos nunca chocan.
+     * Indica si dos selecciones del mismo partido no se pueden combinar (véase {@link ScoreMarkets#conflicts}): las del
+     * mismo mercado, las que no pueden cumplirse a la vez y las que una implica la otra. Las demás sí se combinan,
+     * como en el «crear apuesta» de las casas (ambos marcan y más de 2,5 goles), con la cuota ajustada por correlación.
+     * Partidos distintos nunca chocan.
      */
     static boolean conflicts(LegRequest a, LegRequest b) {
-        if (a.eventId() != b.eventId()) {
-            return false;
-        }
-        if (a.market() == b.market()) {
-            return true;
-        }
-        return (a.market() == Market.BTTS && b.market() == Market.GOALS)
-                || (a.market() == Market.GOALS && b.market() == Market.BTTS);
+        return a.eventId() == b.eventId()
+                && ScoreMarkets.conflicts(a.market(), a.selection(), a.line(), b.market(), b.selection(), b.line());
     }
 
     /**
-     * Registra una combinada: de 2 a 8 selecciones. Pueden ser de un mismo partido siempre que sean compatibles
-     * (véase {@link #conflicts}). La cuota total es el producto de las cuotas que fija el servidor.
+     * Cotización de una combinada.
+     *
+     * @param totalOdds             cuota total que paga el servidor
+     * @param legOdds               cuota de cada selección ya ajustada por correlación (en el orden pedido)
+     * @param correlationAdjustment producto de las cuotas sueltas dividido por la cuota total: 1 si no hay selecciones
+     *                              correlacionadas del mismo partido; mayor que 1 si la cuota baja respecto al producto
+     * @param modelProbability      probabilidad conjunta del modelo, o nula si falta la predicción de algún partido
      */
-    @Transactional
-    public Parlay placeParlay(Long userId, long stake, List<LegRequest> requests) {
-        if (stake < MIN_STAKE) {
-            throw new IllegalArgumentException("El importe mínimo es " + MIN_STAKE + " COP");
+    public record ParlayQuote(double totalOdds, List<Double> legOdds, double correlationAdjustment,
+            Double modelProbability) {
+    }
+
+    private record PricedLeg(LegRequest request, OddsEvent event, BoardMatch match, Offer offer, double odds) {
+    }
+
+    private record Priced(List<PricedLeg> legs, double totalOdds, double correlationAdjustment, Double modelProbability) {
+    }
+
+    /** Cuota total y por selección que pagaría ahora una combinada, sin registrarla. */
+    public ParlayQuote quoteParlay(List<LegRequest> requests) {
+        if (requests == null || requests.isEmpty() || requests.size() > MAX_LEGS) {
+            throw new IllegalArgumentException("Una combinada lleva entre 1 y " + MAX_LEGS + " selecciones");
         }
-        if (requests == null || requests.size() < MIN_LEGS || requests.size() > MAX_LEGS) {
-            throw new IllegalArgumentException("Una combinada lleva entre " + MIN_LEGS + " y " + MAX_LEGS + " selecciones");
-        }
+        Priced priced = price(requests);
+        return new ParlayQuote(priced.totalOdds(), priced.legs().stream().map(PricedLeg::odds).toList(),
+                priced.correlationAdjustment(), priced.modelProbability());
+    }
+
+    /**
+     * Fija la cuota de cada selección. Las de partidos distintos se multiplican tal cual. Las que se deciden por el
+     * marcador dentro de un mismo partido se correlacionan: su cuota conjunta es el producto dividido por el factor
+     * de correlación del modelo, repartido a partes iguales entre ellas para que {@link ParlaySettlement} (que
+     * multiplica las cuotas de las selecciones ganadas) siga pagando la cuota total.
+     */
+    private Priced price(List<LegRequest> requests) {
         for (int i = 0; i < requests.size(); i++) {
             for (int j = i + 1; j < requests.size(); j++) {
                 if (conflicts(requests.get(i), requests.get(j))) {
-                    throw new IllegalArgumentException(
-                            "No se pueden combinar selecciones incompatibles del mismo partido (se contradicen o están correlacionadas)");
+                    throw new IllegalArgumentException("No se pueden combinar dos selecciones del mismo partido que se "
+                            + "contradicen o donde una implica la otra");
                 }
             }
         }
         List<OddsEvent> upcoming = oddsProvider.upcoming(14);
-        Parlay parlay = new Parlay();
-        double total = 1.0;
+        List<OddsEvent> events = new ArrayList<>();
+        List<BoardMatch> matches = new ArrayList<>();
+        List<Offer> offers = new ArrayList<>();
         for (LegRequest request : requests) {
             OddsEvent event = upcoming.stream().filter(e -> e.id() == request.eventId()).findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("Un partido de la combinada no está disponible para apostar"));
@@ -289,21 +308,107 @@ public class BettingService {
                     .filter(o -> o.line().sameAs(request.market(), request.selection(), request.line())).findFirst()
                     .orElseThrow(() -> new IllegalArgumentException(
                             "Una cuota de la combinada ya no está disponible (" + match.homeName() + " - " + match.awayName() + ")"));
-            total *= offer.line().odds();
+            events.add(event);
+            matches.add(match);
+            offers.add(offer);
+        }
 
+        double[] odds = new double[requests.size()];
+        double independent = 1.0;
+        for (int i = 0; i < odds.length; i++) {
+            odds[i] = offers.get(i).line().odds();
+            independent *= odds[i];
+        }
+
+        java.util.Map<Long, List<Integer>> byEvent = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < requests.size(); i++) {
+            byEvent.computeIfAbsent(requests.get(i).eventId(), id -> new ArrayList<>()).add(i);
+        }
+        Double modelProbability = 1.0;
+        for (List<Integer> group : byEvent.values()) {
+            if (group.size() == 1) {
+                Double single = offers.get(group.get(0)).modelProbability();
+                modelProbability = single == null || modelProbability == null ? null : modelProbability * single;
+                continue;
+            }
+            MarketModel model = modelFor(matches.get(group.get(0))).orElse(null);
+            List<MarketModel.Leg> legs = group.stream()
+                    .map(i -> new MarketModel.Leg(requests.get(i).market(), requests.get(i).selection(), requests.get(i).line()))
+                    .toList();
+            List<Integer> scoreLegs = group.stream().filter(i -> ScoreMarkets.condition(requests.get(i).market(),
+                    requests.get(i).selection(), requests.get(i).line()) != null).toList();
+            if (scoreLegs.size() >= 2) {
+                if (model == null) {
+                    throw new IllegalArgumentException("No se pueden combinar ahora esas selecciones del mismo partido: "
+                            + "falta la predicción del partido para calcular la cuota");
+                }
+                double factor = model.correlationFactor(group.stream().filter(scoreLegs::contains).map(i ->
+                        new MarketModel.Leg(requests.get(i).market(), requests.get(i).selection(), requests.get(i).line())).toList());
+                double share = Math.pow(factor, 1.0 / scoreLegs.size());
+                for (int i : scoreLegs) {
+                    odds[i] = Math.round(Math.max(1.01, odds[i] / share) * 10_000.0) / 10_000.0;
+                }
+            }
+            Double joint = model == null ? null : model.jointProbability(legs).orElse(null);
+            modelProbability = joint == null || modelProbability == null ? null : modelProbability * joint;
+        }
+
+        double product = 1.0;
+        for (double value : odds) {
+            product *= value;
+        }
+        double total = Math.round(product * 100.0) / 100.0;
+        List<PricedLeg> priced = new ArrayList<>();
+        for (int i = 0; i < requests.size(); i++) {
+            priced.add(new PricedLeg(requests.get(i), events.get(i), matches.get(i), offers.get(i), odds[i]));
+        }
+        return new Priced(priced, total, product <= 0 ? 1.0 : Math.round(independent / product * 10_000.0) / 10_000.0,
+                modelProbability == null ? null : round4(modelProbability));
+    }
+
+    /** Modelo de probabilidades del partido, si hay predicción para sus dos equipos. */
+    private Optional<MarketModel> modelFor(BoardMatch match) {
+        if (match.homeTeamId() == null || match.awayTeamId() == null || match.homeTeamId().equals(match.awayTeamId())) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(new MarketModel(facade.predict(match.homeTeamId(), match.awayTeamId())));
+        } catch (RuntimeException ex) {
+            log.debug("Sin prediccion para {} - {}: {}", match.homeName(), match.awayName(), ex.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Registra una combinada: de 2 a 8 selecciones. Pueden ser de un mismo partido siempre que sean compatibles
+     * (véase {@link #conflicts}). La cuota total la fija el servidor: el producto de las cuotas, ajustado por la
+     * correlación entre las selecciones de un mismo partido (véase {@link #price}).
+     */
+    @Transactional
+    public Parlay placeParlay(Long userId, long stake, List<LegRequest> requests) {
+        if (stake < MIN_STAKE) {
+            throw new IllegalArgumentException("El importe mínimo es " + MIN_STAKE + " COP");
+        }
+        if (requests == null || requests.size() < MIN_LEGS || requests.size() > MAX_LEGS) {
+            throw new IllegalArgumentException("Una combinada lleva entre " + MIN_LEGS + " y " + MAX_LEGS + " selecciones");
+        }
+        Priced priced = price(requests);
+        Parlay parlay = new Parlay();
+        for (PricedLeg pricedLeg : priced.legs()) {
+            LegRequest request = pricedLeg.request();
             ParlayLeg leg = new ParlayLeg();
-            leg.setEventId(event.id());
-            leg.setHomeTeam(match.homeName());
-            leg.setAwayTeam(match.awayName());
-            leg.setKickoff(event.kickoff());
+            leg.setEventId(pricedLeg.event().id());
+            leg.setHomeTeam(pricedLeg.match().homeName());
+            leg.setAwayTeam(pricedLeg.match().awayName());
+            leg.setKickoff(pricedLeg.event().kickoff());
             leg.setMarket(request.market());
             leg.setSelection(request.selection().toUpperCase());
-            leg.setLine(offer.line().line());
-            leg.setOdds(offer.line().odds());
-            leg.setOddsSource(offer.line().source());
+            leg.setLine(pricedLeg.offer().line().line());
+            leg.setOdds(pricedLeg.odds());
+            leg.setOddsSource(pricedLeg.offer().line().source());
             parlay.addLeg(leg);
         }
-        total = Math.round(total * 100.0) / 100.0;
+        double total = priced.totalOdds();
         if (total > MAX_TOTAL_ODDS) {
             throw new IllegalArgumentException("La cuota total máxima de una combinada es " + (long) MAX_TOTAL_ODDS);
         }

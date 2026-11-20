@@ -55,6 +55,73 @@ public final class MarketModel {
         return p == null ? Optional.empty() : Optional.of(Math.max(0.02, Math.min(0.98, p)));
     }
 
+    /** Una selección del mismo partido, para calcular su correlación con las demás. */
+    public record Leg(Market market, String selection, Double line) {
+    }
+
+    /** Límites del factor: evita que un modelo extremo dispare o hunda la cuota de una combinada. */
+    static final double MIN_CORRELATION = 0.35;
+    static final double MAX_CORRELATION = 3.0;
+
+    /**
+     * Factor de correlación de las selecciones de un mismo partido que se deciden por el marcador (ganador, goles y
+     * ambos marcan): {@code P(todas a la vez) / (P(1) x P(2) x ...)} sobre la matriz de marcadores. Vale 1 con menos
+     * de dos de ellas (córneres y tarjetas se tratan como independientes). Por encima de 1, las selecciones se
+     * favorecen entre sí (ambos marcan y más de 2,5 goles) y la cuota conjunta es menor que el producto; por debajo
+     * de 1 se oponen (ambos marcan y menos de 2,5) y es mayor. Así calculan las casas el «crear apuesta».
+     */
+    public double correlationFactor(List<Leg> legs) {
+        List<java.util.function.BiPredicate<Integer, Integer>> conditions = new ArrayList<>();
+        for (Leg leg : legs) {
+            java.util.function.BiPredicate<Integer, Integer> condition = ScoreMarkets.condition(leg.market(), leg.selection(),
+                    leg.line());
+            if (condition != null) {
+                conditions.add(condition);
+            }
+        }
+        if (conditions.size() < 2) {
+            return 1.0;
+        }
+        double independent = 1.0;
+        for (java.util.function.BiPredicate<Integer, Integer> condition : conditions) {
+            independent *= distribution.probability(condition);
+        }
+        double joint = distribution.probability((h, a) -> conditions.stream().allMatch(c -> c.test(h, a)));
+        if (independent <= 0.0 || joint <= 0.0) {
+            return 1.0;
+        }
+        return Math.max(MIN_CORRELATION, Math.min(MAX_CORRELATION, joint / independent));
+    }
+
+    /** Probabilidad conjunta del modelo para las selecciones del marcador (las demás se multiplican, independientes). */
+    public Optional<Double> jointProbability(List<Leg> legs) {
+        double product = 1.0;
+        List<Leg> scoreLegs = new ArrayList<>();
+        for (Leg leg : legs) {
+            if (ScoreMarkets.condition(leg.market(), leg.selection(), leg.line()) != null) {
+                scoreLegs.add(leg);
+            } else {
+                Optional<Double> p = probability(leg.market(), leg.selection(), leg.line());
+                if (p.isEmpty()) {
+                    return Optional.empty();
+                }
+                product *= p.get();
+            }
+        }
+        if (!scoreLegs.isEmpty()) {
+            double independent = 1.0;
+            for (Leg leg : scoreLegs) {
+                Optional<Double> p = probability(leg.market(), leg.selection(), leg.line());
+                if (p.isEmpty()) {
+                    return Optional.empty();
+                }
+                independent *= p.get();
+            }
+            product *= independent * correlationFactor(scoreLegs);
+        }
+        return Optional.of(Math.max(0.0001, Math.min(0.98, product)));
+    }
+
     /** Cuotas "demo" de tarjetas: salen del propio modelo con un margen de casa, por lo que no tienen ventaja. */
     public List<OddsLine> demoCardOdds() {
         List<OddsLine> lines = new ArrayList<>();

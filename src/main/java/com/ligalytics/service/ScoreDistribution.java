@@ -97,6 +97,11 @@ public final class ScoreDistribution {
         return sum((h, a) -> h > 0 && a > 0);
     }
 
+    /** Probabilidad de que el marcador final cumpla la condición sobre (goles local, goles visitante). */
+    public double probability(java.util.function.BiPredicate<Integer, Integer> condition) {
+        return sum(condition::test);
+    }
+
     /** Los {@code n} marcadores más probables. */
     public List<ScoreProbability> topScores(int n) {
         List<ScoreProbability> scores = new ArrayList<>();

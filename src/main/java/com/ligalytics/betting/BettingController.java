@@ -103,6 +103,14 @@ public class BettingController {
             @NotEmpty @Size(max = BettingService.MAX_LEGS) List<@Valid ParlayLegRequest> legs) {
     }
 
+    public record QuoteParlayRequest(
+            @NotEmpty @Size(max = BettingService.MAX_LEGS) List<@Valid ParlayLegRequest> legs) {
+    }
+
+    public record ParlayQuoteDto(double totalOdds, List<Double> legOdds, double correlationAdjustment,
+            Double modelProbability) {
+    }
+
     public record PlaceBetRequest(@NotNull Long eventId, @NotBlank String market, @NotBlank String selection, Double line,
             @NotNull Long stake) {
     }
@@ -157,12 +165,8 @@ public class BettingController {
                 request.line(), request.stake()));
     }
 
-    @PostMapping("/parlays")
-    @Operation(summary = "Hace una apuesta combinada (parlay) con saldo ficticio: la cuota total es el producto de las cuotas")
-    public ParlayDto placeParlay(@RequestAttribute(AuthInterceptor.USER_ID_ATTRIBUTE) Long userId,
-            @Valid @RequestBody PlaceParlayRequest request) {
-        requireOdds();
-        List<BettingService.LegRequest> legs = request.legs().stream().map(l -> {
+    private static List<BettingService.LegRequest> toLegs(List<ParlayLegRequest> legs) {
+        return legs.stream().map(l -> {
             try {
                 return new BettingService.LegRequest(l.eventId(), Market.valueOf(l.market().trim().toUpperCase()),
                         l.selection().trim(), l.line());
@@ -170,7 +174,27 @@ public class BettingController {
                 throw new IllegalArgumentException("Mercado no válido: " + l.market());
             }
         }).toList();
-        return ParlayDto.of(service.placeParlay(userId, request.stake(), legs));
+    }
+
+    @PostMapping("/parlays")
+    @Operation(summary = "Hace una apuesta combinada (parlay) con saldo ficticio: la cuota total es el producto de las "
+            + "cuotas, ajustado por correlación si hay varias selecciones del mismo partido")
+    public ParlayDto placeParlay(@RequestAttribute(AuthInterceptor.USER_ID_ATTRIBUTE) Long userId,
+            @Valid @RequestBody PlaceParlayRequest request) {
+        requireOdds();
+        return ParlayDto.of(service.placeParlay(userId, request.stake(), toLegs(request.legs())));
+    }
+
+    @PostMapping("/parlays/quote")
+    @Operation(summary = "Cuota que pagaría ahora una combinada (sin apostar)",
+            description = "Devuelve la cuota total y la de cada selección. Varias selecciones del mismo partido que se "
+                    + "deciden por el marcador (ganador, goles, ambos marcan) se ajustan por correlación, como en el "
+                    + "«crear apuesta» de las casas: ambos marcan y más de 2,5 goles pagan menos que el producto.")
+    public ParlayQuoteDto quoteParlay(@Valid @RequestBody QuoteParlayRequest request) {
+        requireOdds();
+        BettingService.ParlayQuote quote = service.quoteParlay(toLegs(request.legs()));
+        return new ParlayQuoteDto(quote.totalOdds(), quote.legOdds(), quote.correlationAdjustment(),
+                quote.modelProbability());
     }
 
     @GetMapping("/parlays")
