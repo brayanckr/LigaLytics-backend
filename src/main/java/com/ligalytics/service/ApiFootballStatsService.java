@@ -3,7 +3,6 @@ package com.ligalytics.service;
 import java.text.Normalizer;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -41,7 +40,8 @@ public class ApiFootballStatsService {
     private static final Logger log = LoggerFactory.getLogger(ApiFootballStatsService.class);
     private static final Duration RETRY_AFTER = Duration.ofHours(1);
     private static final Duration QUOTA_PAUSE = Duration.ofHours(1);
-    private static final Duration FIXTURES_TTL = Duration.ofHours(6);
+    private static final Duration FIXTURES_TTL = Duration.ofHours(24);
+    private static final Duration SEASON_BLOCK = Duration.ofHours(24);
 
     /** tipo de estadística de API-Football, clave, etiqueta. */
     private static final String[][] STAT_DEFS = {
@@ -70,8 +70,10 @@ public class ApiFootballStatsService {
     /** Guarda en una transacción propia: quien llama puede estar dentro de una de solo lectura. */
     private final TransactionTemplate writeTx;
     private final Map<Long, Instant> retryAt = new ConcurrentHashMap<>();
-    private final Map<LocalDate, CachedFixtures> fixturesByDay = new ConcurrentHashMap<>();
+    private final Map<Integer, CachedFixtures> fixturesBySeason = new ConcurrentHashMap<>();
     private volatile Instant pausedUntil = Instant.EPOCH;
+    /** Temporadas que el plan de la clave no permite consultar (p. ej. la actual en el plan gratuito), por año. */
+    private final Map<Integer, Instant> seasonBlockedUntil = new ConcurrentHashMap<>();
 
     public ApiFootballStatsService(ApiFootballClient client, MatchApiStatsRepository repository,
             PlatformTransactionManager transactionManager) {
@@ -98,6 +100,11 @@ public class ApiFootballStatsService {
         if (retry != null && Instant.now().isBefore(retry)) {
             return Optional.empty();
         }
+        int season = SeasonUtil.startYear(match.getMatchDate());
+        Instant blocked = seasonBlockedUntil.get(season);
+        if (blocked != null && Instant.now().isBefore(blocked)) {
+            return Optional.empty();
+        }
         try {
             Optional<List<Stat>> fetched = fetch(match);
             if (fetched.isEmpty()) {
@@ -113,14 +120,17 @@ public class ApiFootballStatsService {
             if (lower.contains("limit") || lower.contains("quota")) {
                 pausedUntil = Instant.now().plus(QUOTA_PAUSE);
             }
+            if (lower.contains("access to this season") || lower.contains("plan")) {
+                // El plan no cubre esa temporada: reintentar solo gastaría cuota.
+                seasonBlockedUntil.put(season, Instant.now().plus(SEASON_BLOCK));
+            }
             retryAt.put(match.getId(), Instant.now().plus(RETRY_AFTER));
             return Optional.empty();
         }
     }
 
     private Optional<List<Stat>> fetch(Match match) {
-        LocalDate day = match.getMatchDate().toLocalDate();
-        JsonNode fixtures = fixturesOf(day, SeasonUtil.startYear(match.getMatchDate()));
+        JsonNode fixtures = fixturesOf(SeasonUtil.startYear(match.getMatchDate()));
         Optional<JsonNode> fixture = findFixture(fixtures, match.getHomeTeam().getName(), match.getAwayTeam().getName());
         if (fixture.isEmpty()) {
             return Optional.empty();
@@ -141,14 +151,14 @@ public class ApiFootballStatsService {
         return Optional.of(stats);
     }
 
-    /** Fixtures del día, compartidos entre los partidos de ese día para gastar una sola petición. */
-    private JsonNode fixturesOf(LocalDate day, int season) {
-        CachedFixtures cached = fixturesByDay.get(day);
+    /** Partidos de la temporada, compartidos entre todos los partidos de ella para gastar una sola petición. */
+    private JsonNode fixturesOf(int season) {
+        CachedFixtures cached = fixturesBySeason.get(season);
         if (cached != null && cached.expiresAt().isAfter(Instant.now())) {
             return cached.value();
         }
-        JsonNode fixtures = client.fixturesOn(day, season);
-        fixturesByDay.put(day, new CachedFixtures(fixtures, Instant.now().plus(FIXTURES_TTL)));
+        JsonNode fixtures = client.fixturesOfSeason(season);
+        fixturesBySeason.put(season, new CachedFixtures(fixtures, Instant.now().plus(FIXTURES_TTL)));
         return fixtures;
     }
 

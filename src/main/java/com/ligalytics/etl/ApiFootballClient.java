@@ -3,7 +3,6 @@ package com.ligalytics.etl;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.LocalDate;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -18,8 +17,8 @@ import com.ligalytics.exception.ExternalServiceException;
 
 /**
  * Cliente de API-Football (api-sports.io, v3). La clave se define con {@code API_FOOTBALL_KEY}. El plan gratuito da
- * 100 peticiones al día: este cliente solo hace las dos que hacen falta para un partido (fixtures de un día y
- * estadísticas del partido) y devuelve el nodo {@code response}; los errores de la API (cuota, plan, temporada) llegan
+ * 100 peticiones al día: este cliente solo hace las que hacen falta para un partido (los partidos de su temporada,
+ * una vez por temporada, y las estadísticas del partido) y devuelve el nodo {@code response}; los errores de la API (cuota, plan, temporada) llegan
  * con HTTP 200 en el campo {@code errors} y se convierten en {@link ExternalServiceException}.
  */
 @Component
@@ -46,10 +45,12 @@ public class ApiFootballClient {
         return !apiKey.isBlank();
     }
 
-    /** Partidos de LaLiga de un día (hora de Madrid) de una temporada (año de inicio). */
-    public JsonNode fixturesOn(LocalDate date, int season) {
-        return get("/fixtures?league=" + leagueId + "&season=" + season + "&date=" + date
-                + "&timezone=Europe/Madrid");
+    /**
+     * Todos los partidos de LaLiga de una temporada (año de inicio) en una sola petición. No se filtra por fecha: el
+     * plan gratuito solo deja usar {@code date} en la ventana ayer-mañana, pero sí la temporada completa (2022-2024).
+     */
+    public JsonNode fixturesOfSeason(int season) {
+        return get("/fixtures?league=" + leagueId + "&season=" + season);
     }
 
     /** Estadísticas de un partido: un elemento por equipo con su lista {@code statistics}. */
