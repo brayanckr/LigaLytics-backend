@@ -214,6 +214,109 @@ public class EtlService {
         return new EtlSummary("transfermarkt", reference, values.size(), values.size(), 0, updated, skipped, location);
     }
 
+    /**
+     * Completa con las estadísticas de football-data.co.uk (córneres, tarjetas, tiros y faltas) los partidos de la
+     * temporada que ya están guardados, p. ej. los que llegaron del calendario solo con el marcador. Solo rellena los
+     * campos que están vacíos (nunca pisa un dato existente) y no crea partidos: los que el CSV no trae o no se
+     * encuentran en la base de datos se omiten. La fecha se busca con un día de margen por la zona horaria.
+     */
+    @Transactional
+    public EtlSummary completeFootballDataStats(String seasonCode, String divisionCode) {
+        String location = footballDataProxy.seasonUrl(seasonCode, divisionCode);
+        List<RawMatch> rawMatches = footballDataParser.parse(footballDataProxy.fetch(location));
+        int updated = 0;
+        int skipped = 0;
+        Set<Long> affectedTeamIds = new HashSet<>();
+        for (RawMatch raw : rawMatches) {
+            Optional<Match> found = raw.matchDate() == null ? Optional.empty() : findMatchWithMargin(raw);
+            if (found.isEmpty() || !fillMissingStats(found.get(), raw)) {
+                skipped++;
+                continue;
+            }
+            matchRepository.save(found.get());
+            affectedTeamIds.add(found.get().getHomeTeam().getId());
+            affectedTeamIds.add(found.get().getAwayTeam().getId());
+            updated++;
+        }
+        log.info("[football-data-stats] partidos completados={} omitidos={} (total parseado={})", updated, skipped,
+                rawMatches.size());
+        if (updated > 0) {
+            publishEtlEvent("football-data-stats", divisionCode + "-" + seasonCode, seasonCode, affectedTeamIds, 0,
+                    updated, skipped, location);
+        }
+        return new EtlSummary("football-data-stats", divisionCode + "-" + seasonCode, rawMatches.size(),
+                rawMatches.size(), 0, updated, skipped, location);
+    }
+
+    private Optional<Match> findMatchWithMargin(RawMatch raw) {
+        Optional<Team> home = teamRepository.findByNameIgnoreCase(canonicalName(raw.homeTeam()));
+        Optional<Team> away = teamRepository.findByNameIgnoreCase(canonicalName(raw.awayTeam()));
+        if (home.isEmpty() || away.isEmpty()) {
+            return Optional.empty();
+        }
+        LocalDate day = raw.matchDate().toLocalDate();
+        return matchRepository.findFirstByHomeTeamIdAndAwayTeamIdAndMatchDateBetween(home.get().getId(),
+                away.get().getId(), day.minusDays(1).atStartOfDay(), day.plusDays(1).atTime(LocalTime.MAX));
+    }
+
+    /** Copia al partido los datos que le faltan; devuelve si cambió algo. */
+    static boolean fillMissingStats(Match match, RawMatch raw) {
+        boolean changed = false;
+        if (match.getCorners() == null && raw.corners() != null) {
+            match.setCorners(raw.corners());
+            changed = true;
+        }
+        if (match.getYellowCards() == null && raw.yellowCards() != null) {
+            match.setYellowCards(raw.yellowCards());
+            changed = true;
+        }
+        if (match.getRedCards() == null && raw.redCards() != null) {
+            match.setRedCards(raw.redCards());
+            changed = true;
+        }
+        if (match.getHomeYellowCards() == null && raw.homeYellowCards() != null) {
+            match.setHomeYellowCards(raw.homeYellowCards());
+            changed = true;
+        }
+        if (match.getAwayYellowCards() == null && raw.awayYellowCards() != null) {
+            match.setAwayYellowCards(raw.awayYellowCards());
+            changed = true;
+        }
+        if (match.getHomeRedCards() == null && raw.homeRedCards() != null) {
+            match.setHomeRedCards(raw.homeRedCards());
+            changed = true;
+        }
+        if (match.getAwayRedCards() == null && raw.awayRedCards() != null) {
+            match.setAwayRedCards(raw.awayRedCards());
+            changed = true;
+        }
+        if (match.getHomeShots() == null && raw.homeShots() != null) {
+            match.setHomeShots(raw.homeShots());
+            changed = true;
+        }
+        if (match.getAwayShots() == null && raw.awayShots() != null) {
+            match.setAwayShots(raw.awayShots());
+            changed = true;
+        }
+        if (match.getHomeShotsOnTarget() == null && raw.homeShotsOnTarget() != null) {
+            match.setHomeShotsOnTarget(raw.homeShotsOnTarget());
+            changed = true;
+        }
+        if (match.getAwayShotsOnTarget() == null && raw.awayShotsOnTarget() != null) {
+            match.setAwayShotsOnTarget(raw.awayShotsOnTarget());
+            changed = true;
+        }
+        if (match.getHomeFouls() == null && raw.homeFouls() != null) {
+            match.setHomeFouls(raw.homeFouls());
+            changed = true;
+        }
+        if (match.getAwayFouls() == null && raw.awayFouls() != null) {
+            match.setAwayFouls(raw.awayFouls());
+            changed = true;
+        }
+        return changed;
+    }
+
     private EtlSummary persistMatches(String source,
             String reference,
             String season,

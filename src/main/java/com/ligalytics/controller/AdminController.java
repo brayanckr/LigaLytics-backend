@@ -54,17 +54,20 @@ public class AdminController {
     private final DataSeederService dataSeederService;
     private final WekaTrainingService trainingService;
     private final com.ligalytics.etl.CurrentSeasonSync currentSeasonSync;
+    private final com.ligalytics.etl.FootballDataStatsSync statsSync;
     private final String adminApiKey;
 
     public AdminController(LigaLyticsFacade facade,
             DataSeederService dataSeederService,
             WekaTrainingService trainingService,
             com.ligalytics.etl.CurrentSeasonSync currentSeasonSync,
+            com.ligalytics.etl.FootballDataStatsSync statsSync,
             @Value("${ligalytics.admin.api-key:}") String adminApiKey) {
         this.facade = facade;
         this.dataSeederService = dataSeederService;
         this.trainingService = trainingService;
         this.currentSeasonSync = currentSeasonSync;
+        this.statsSync = statsSync;
         this.adminApiKey = adminApiKey == null ? "" : adminApiKey;
     }
 
@@ -239,6 +242,19 @@ public class AdminController {
             @RequestHeader(name = "X-Admin-Key", required = false) String apiKey) {
         requireAdminKey(apiKey);
         return currentSeasonSync.sync();
+    }
+
+    @PostMapping("/etl/current-season-stats")
+    @Operation(summary = "Completa las estadísticas de la temporada en curso",
+            description = "Descarga el CSV de football-data.co.uk de la temporada actual y rellena córneres, tarjetas, "
+                    + "tiros y faltas de los partidos ya guardados que no los tienen (no pisa datos existentes ni crea "
+                    + "partidos). Se ejecuta también automáticamente cada 6 horas.")
+    @ApiResponse(responseCode = "200", description = "Resumen: partidos completados y omitidos")
+    @ApiResponse(responseCode = "401", description = "Clave de administración incorrecta")
+    public com.ligalytics.etl.dto.EtlSummary completeCurrentSeasonStats(
+            @RequestHeader(name = "X-Admin-Key", required = false) String apiKey) {
+        requireAdminKey(apiKey);
+        return statsSync.sync();
     }
 
     @PostMapping("/etl/transfermarkt")
