@@ -91,7 +91,11 @@ class ApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
                 .andExpect(jsonPath("$[0].name", is("FC Barcelona")))
-                .andExpect(jsonPath("$[1].name", is("Real Madrid")));
+                .andExpect(jsonPath("$[1].name", is("Real Madrid")))
+                // Promedios por partido calculados con los partidos guardados (11 y 9 córneres, 4 y 6 tarjetas).
+                .andExpect(jsonPath("$[1].averageCorners", is(10.0)))
+                .andExpect(jsonPath("$[1].averageCards", is(5.0)))
+                .andExpect(jsonPath("$[1].statsSeason", is("2024/2025")));
     }
 
     @Test
@@ -113,6 +117,8 @@ class ApiIntegrationTest {
                 .andExpect(jsonPath("$.losses", is(0)))
                 .andExpect(jsonPath("$.goalsFor", is(3)))
                 .andExpect(jsonPath("$.points", is(4)))
+                .andExpect(jsonPath("$.averageCorners", is(10.0)))
+                .andExpect(jsonPath("$.averageYellowCards", is(5.0)))
                 .andExpect(jsonPath("$.recentMatches", hasSize(2)));
     }
 

@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -103,9 +104,11 @@ public class LigaLyticsFacade {
                 ? teamsInSeason(latest.get())
                 : teamRepository.findAll();
         String filter = query == null ? "" : query.trim().toLowerCase();
+        // Promedios de córneres y tarjetas con los partidos que ya están en la base de datos: sin llamar a ninguna API.
+        Map<Long, TeamAverages> averages = latest.isPresent() ? averagesByTeam(teams, latest.get()) : Map.of();
         return teams.stream()
                 .filter(team -> filter.isEmpty() || team.getName().toLowerCase().contains(filter))
-                .map(this::toTeamDto)
+                .map(team -> toTeamDto(team, averages.get(team.getId())))
                 .sorted(Comparator.comparing(TeamDto::name, String.CASE_INSENSITIVE_ORDER))
                 .toList();
     }
@@ -514,7 +517,9 @@ public class LigaLyticsFacade {
         int goalsFor = 0;
         int goalsAgainst = 0;
         int corners = 0;
-        int yellowCards = 0;
+        int cornerMatches = 0;
+        int cards = 0;
+        int cardMatches = 0;
 
         for (Match match : matches) {
             if (match.getFullTimeHomeGoals() == null || match.getFullTimeAwayGoals() == null) {
@@ -536,15 +541,19 @@ public class LigaLyticsFacade {
             }
             if (match.getCorners() != null) {
                 corners += match.getCorners();
+                cornerMatches++;
             }
             if (match.getYellowCards() != null) {
-                yellowCards += match.getYellowCards();
+                cards += match.getYellowCards() + (match.getRedCards() == null ? 0 : match.getRedCards());
+                cardMatches++;
             }
         }
 
+        // Solo se promedia sobre los partidos que traen el dato; sin ninguno, nulo (no 0,00).
         return new Aggregate(played, wins, draws, losses, goalsFor, goalsAgainst, wins * 3 + draws,
-                average(goalsFor, played), average(goalsAgainst, played), average(corners, played),
-                average(yellowCards, played));
+                average(goalsFor, played), average(goalsAgainst, played),
+                cornerMatches == 0 ? null : average(corners, cornerMatches),
+                cardMatches == 0 ? null : average(cards, cardMatches));
     }
 
     /** Forma de los últimos partidos jugados (el más reciente a la derecha). */
@@ -573,12 +582,60 @@ public class LigaLyticsFacade {
         return scored == conceded ? "D" : "L";
     }
 
-    private TeamDto toTeamDto(Team team) {
+    private TeamDto toTeamDto(Team team, TeamAverages averages) {
         TeamProfiles.Profile profile = TeamProfiles.of(team.getName()).orElse(null);
         return new TeamDto(team.getId(), team.getName(),
                 team.getStadium() != null || profile == null ? team.getStadium() : profile.stadium(),
                 team.getMarketValue() != null || profile == null ? team.getMarketValue() : profile.marketValue(),
-                profile == null ? null : profile.crest());
+                profile == null ? null : profile.crest(),
+                averages == null ? null : averages.corners(), averages == null ? null : averages.cards(),
+                averages == null ? null : averages.season());
+    }
+
+    /** Córneres y tarjetas por partido de un equipo y la temporada de la que salen. */
+    private record TeamAverages(Double corners, Double cards, String season) {
+    }
+
+    /** Tres temporadas como máximo hacia atrás, por si la actual aún no trae córneres o tarjetas. */
+    private static final int AVERAGE_SEASONS = 3;
+
+    /**
+     * Promedio de córneres y de tarjetas (amarillas + rojas) por partido de cada equipo, solo con los partidos que
+     * tienen el dato. Usa la temporada más reciente que lo tenga para ese equipo (una consulta por temporada).
+     */
+    private Map<Long, TeamAverages> averagesByTeam(Collection<Team> teams, int latestYear) {
+        Map<Long, TeamAverages> result = new HashMap<>();
+        for (int year = latestYear; year > latestYear - AVERAGE_SEASONS && result.size() < teams.size(); year--) {
+            // por equipo: {córneres, partidos con córneres, tarjetas, partidos con tarjetas}
+            Map<Long, double[]> sums = new HashMap<>();
+            for (Match match : matchRepository.findBetweenWithTeams(SeasonUtil.start(year), SeasonUtil.endExclusive(year))) {
+                if (match.getFullTimeHomeGoals() == null || match.getFullTimeAwayGoals() == null) {
+                    continue;
+                }
+                Integer cards = match.getYellowCards() == null ? null
+                        : match.getYellowCards() + (match.getRedCards() == null ? 0 : match.getRedCards());
+                for (Team side : List.of(match.getHomeTeam(), match.getAwayTeam())) {
+                    double[] acc = sums.computeIfAbsent(side.getId(), id -> new double[4]);
+                    if (match.getCorners() != null) {
+                        acc[0] += match.getCorners();
+                        acc[1]++;
+                    }
+                    if (cards != null) {
+                        acc[2] += cards;
+                        acc[3]++;
+                    }
+                }
+            }
+            for (Team team : teams) {
+                double[] acc = sums.get(team.getId());
+                if (result.containsKey(team.getId()) || acc == null || (acc[1] == 0 && acc[3] == 0)) {
+                    continue;
+                }
+                result.put(team.getId(), new TeamAverages(acc[1] == 0 ? null : round(acc[0] / acc[1]),
+                        acc[3] == 0 ? null : round(acc[2] / acc[3]), SeasonUtil.label(year)));
+            }
+        }
+        return result;
     }
 
     private MatchSummaryDto toMatchSummary(Match match) {
@@ -655,8 +712,8 @@ public class LigaLyticsFacade {
     }
 
     private record Aggregate(int played, int wins, int draws, int losses, int goalsFor, int goalsAgainst,
-            int points, double averageGoalsFor, double averageGoalsAgainst, double averageCorners,
-            double averageYellowCards) {
+            int points, double averageGoalsFor, double averageGoalsAgainst, Double averageCorners,
+            Double averageYellowCards) {
     }
 
     /**
