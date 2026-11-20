@@ -22,7 +22,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ligalytics.AuthenticatedMockMvcConfig;
 import com.ligalytics.model.Match;
+import com.ligalytics.model.MatchApiStats;
 import com.ligalytics.model.Team;
+import com.ligalytics.repository.MatchApiStatsRepository;
 import com.ligalytics.repository.MatchRepository;
 import com.ligalytics.repository.TeamRepository;
 import com.ligalytics.repository.TeamStatsRepository;
@@ -43,9 +45,12 @@ class MatchDetailTest {
     private TeamStatsRepository teamStatsRepository;
     @Autowired
     private MockMvc mockMvc;
+    @Autowired
+    private MatchApiStatsRepository apiStatsRepository;
 
     @BeforeEach
     void clean() {
+        apiStatsRepository.deleteAll();
         matchRepository.deleteAll();
         teamStatsRepository.deleteAll();
         teamRepository.deleteAll();
@@ -99,5 +104,23 @@ class MatchDetailTest {
                 .andExpect(jsonPath("$.stats[?(@.key=='shots')].home", org.hamcrest.Matchers.hasItem(14.0)));
 
         mockMvc.perform(get("/matches/{id}", 999999)).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void storedApiFootballStatsReplaceTheDatabaseOnes() throws Exception {
+        Team home = teamRepository.save(Team.builder().name("Celta Vigo").build());
+        Team away = teamRepository.save(Team.builder().name("Levante").build());
+        Match match = matchRepository.save(Match.builder().matchDate(LocalDateTime.of(2026, 11, 8, 21, 0))
+                .homeTeam(home).awayTeam(away).fullTimeHomeGoals(0).fullTimeAwayGoals(0).corners(9).build());
+        apiStatsRepository.save(new MatchApiStats(match.getId(), 1002L, """
+                [{"key":"corners","label":"Córneres","home":7.0,"away":2.0},
+                 {"key":"shots","label":"Tiros","home":14.0,"away":6.0}]""", java.time.Instant.now()));
+
+        mockMvc.perform(get("/matches/{id}", match.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.stats", hasSize(2)))
+                // Córneres de cada equipo, no solo el total (9) que guardaba la base de datos.
+                .andExpect(jsonPath("$.stats[0].home", is(7.0)))
+                .andExpect(jsonPath("$.stats[0].away", is(2.0)));
     }
 }

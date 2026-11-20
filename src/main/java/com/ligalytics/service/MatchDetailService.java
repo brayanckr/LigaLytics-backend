@@ -54,9 +54,13 @@ public class MatchDetailService {
     private final BzzoiroClient bzzoiro;
     private final Map<Long, Cached> liveCache = new ConcurrentHashMap<>();
 
-    public MatchDetailService(MatchRepository matchRepository, BzzoiroClient bzzoiro) {
+    private final ApiFootballStatsService apiFootballStats;
+
+    public MatchDetailService(MatchRepository matchRepository, BzzoiroClient bzzoiro,
+            ApiFootballStatsService apiFootballStats) {
         this.matchRepository = matchRepository;
         this.bzzoiro = bzzoiro;
+        this.apiFootballStats = apiFootballStats;
     }
 
     /** Partido ya jugado y guardado en la base de datos. */
@@ -73,6 +77,12 @@ public class MatchDetailService {
         if (m.getCorners() != null) {
             // La base guarda los córneres solo como total del partido: se muestra sin reparto por equipo.
             stats.add(new Stat("corners", "Córneres (total)", m.getCorners().doubleValue(), null));
+        }
+        // Si API-Football tiene el partido, sus estadísticas reales (por equipo, con córneres de cada uno) sustituyen
+        // a las de la base de datos; si no, se muestran las guardadas.
+        List<Stat> exact = apiFootballStats.statsFor(m).orElse(null);
+        if (exact != null) {
+            stats = exact;
         }
         LocalDateTime date = m.getMatchDate();
         return new MatchDetailDto(m.getId(), null, "FINISHED", null, date, SeasonUtil.label(SeasonUtil.startYear(date)),
