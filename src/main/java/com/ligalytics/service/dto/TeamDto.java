@@ -12,6 +12,7 @@ public record TeamDto(
         @Schema(description = "Identificador del equipo", example = "1") Long id,
         @Schema(description = "Nombre del equipo", example = "Real Madrid") String name,
         @Schema(description = "Estadio", example = "Santiago Bernabéu") String stadium,
-        @Schema(description = "Valor de mercado de la plantilla (€)", example = "1200000000") BigDecimal marketValue
+        @Schema(description = "Valor de mercado de la plantilla (€)", example = "1200000000") BigDecimal marketValue,
+        @Schema(description = "URL del escudo oficial (nula si no se conoce)") String crest
 ) {
 }

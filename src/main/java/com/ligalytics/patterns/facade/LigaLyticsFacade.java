@@ -49,6 +49,7 @@ import com.ligalytics.service.dto.MatchSummaryDto;
 import com.ligalytics.service.dto.PredictionResponseDto;
 import com.ligalytics.service.dto.RankingEntryDto;
 import com.ligalytics.service.dto.SeasonDto;
+import com.ligalytics.service.TeamProfiles;
 import com.ligalytics.service.dto.TeamDto;
 import com.ligalytics.service.dto.TeamStatsDto;
 
@@ -158,7 +159,10 @@ public class LigaLyticsFacade {
                 .map(this::toMatchSummary)
                 .toList();
 
-        return new TeamStatsDto(team.getId(), team.getName(), team.getStadium(), team.getMarketValue(),
+        TeamProfiles.Profile profile = TeamProfiles.of(team.getName()).orElse(null);
+        return new TeamStatsDto(team.getId(), team.getName(),
+                team.getStadium() != null || profile == null ? team.getStadium() : profile.stadium(),
+                team.getMarketValue() != null || profile == null ? team.getMarketValue() : profile.marketValue(),
                 aggregate.played(), aggregate.wins(), aggregate.draws(), aggregate.losses(),
                 aggregate.goalsFor(), aggregate.goalsAgainst(), aggregate.points(),
                 aggregate.averageGoalsFor(), aggregate.averageGoalsAgainst(),
@@ -570,7 +574,11 @@ public class LigaLyticsFacade {
     }
 
     private TeamDto toTeamDto(Team team) {
-        return new TeamDto(team.getId(), team.getName(), team.getStadium(), team.getMarketValue());
+        TeamProfiles.Profile profile = TeamProfiles.of(team.getName()).orElse(null);
+        return new TeamDto(team.getId(), team.getName(),
+                team.getStadium() != null || profile == null ? team.getStadium() : profile.stadium(),
+                team.getMarketValue() != null || profile == null ? team.getMarketValue() : profile.marketValue(),
+                profile == null ? null : profile.crest());
     }
 
     private MatchSummaryDto toMatchSummary(Match match) {
