@@ -239,8 +239,25 @@ public class BettingService {
     }
 
     /**
-     * Registra una combinada: de 2 a 8 selecciones de partidos distintos (dos selecciones del mismo partido están
-     * correlacionadas y no se combinan). La cuota total es el producto de las cuotas que fija el servidor.
+     * Indica si dos selecciones del mismo partido son incompatibles en una combinada: o se contradicen o una implica
+     * a la otra, de modo que multiplicar sus cuotas inflaría la cuota total. Son incompatibles las del mismo mercado
+     * (Sí/No de ambos marcan, más/menos de goles, dos resultados 1X2, la misma selección repetida) y las de ambos
+     * marcan con las de goles (ambos marcan «Sí» ya implica al menos 2 goles). Partidos distintos nunca chocan.
+     */
+    static boolean conflicts(LegRequest a, LegRequest b) {
+        if (a.eventId() != b.eventId()) {
+            return false;
+        }
+        if (a.market() == b.market()) {
+            return true;
+        }
+        return (a.market() == Market.BTTS && b.market() == Market.GOALS)
+                || (a.market() == Market.GOALS && b.market() == Market.BTTS);
+    }
+
+    /**
+     * Registra una combinada: de 2 a 8 selecciones. Pueden ser de un mismo partido siempre que sean compatibles
+     * (véase {@link #conflicts}). La cuota total es el producto de las cuotas que fija el servidor.
      */
     @Transactional
     public Parlay placeParlay(Long userId, long stake, List<LegRequest> requests) {
@@ -250,8 +267,13 @@ public class BettingService {
         if (requests == null || requests.size() < MIN_LEGS || requests.size() > MAX_LEGS) {
             throw new IllegalArgumentException("Una combinada lleva entre " + MIN_LEGS + " y " + MAX_LEGS + " selecciones");
         }
-        if (requests.stream().map(LegRequest::eventId).distinct().count() != requests.size()) {
-            throw new IllegalArgumentException("No se pueden combinar dos selecciones del mismo partido");
+        for (int i = 0; i < requests.size(); i++) {
+            for (int j = i + 1; j < requests.size(); j++) {
+                if (conflicts(requests.get(i), requests.get(j))) {
+                    throw new IllegalArgumentException(
+                            "No se pueden combinar selecciones incompatibles del mismo partido (se contradicen o están correlacionadas)");
+                }
+            }
         }
         List<OddsEvent> upcoming = oddsProvider.upcoming(14);
         Parlay parlay = new Parlay();

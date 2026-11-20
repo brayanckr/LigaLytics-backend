@@ -238,7 +238,7 @@ class BettingFlowTest {
         // Una sola selección, dos del mismo partido, una cuota inexistente, importe bajo y saldo insuficiente.
         assertThrows(IllegalArgumentException.class, () -> service.placeParlay(userId, 5_000, List.of(winner)));
         assertThrows(IllegalArgumentException.class, () -> service.placeParlay(userId, 5_000, List.of(winner,
-                new BettingService.LegRequest(777L, Market.GOALS, "OVER", 2.5))));
+                new BettingService.LegRequest(777L, Market.WINNER, "DRAW", null))));
         assertThrows(IllegalArgumentException.class, () -> service.placeParlay(userId, 5_000, List.of(winner,
                 new BettingService.LegRequest(778L, Market.WINNER, "DRAW", null))));
         assertThrows(IllegalArgumentException.class, () -> service.placeParlay(userId, 500, List.of(winner, corners)));
@@ -261,14 +261,17 @@ class BettingFlowTest {
                 // La misma selección repetida.
                 List.of(new BettingService.LegRequest(777L, Market.WINNER, "HOME", null),
                         new BettingService.LegRequest(777L, Market.WINNER, "HOME", null)),
-                // Dos mercados distintos del mismo partido (correlacionados) tampoco se combinan.
-                List.of(new BettingService.LegRequest(777L, Market.WINNER, "HOME", null),
-                        new BettingService.LegRequest(777L, Market.GOALS, "OVER", 2.5)));
+                // Ambos marcan Sí y No.
+                List.of(new BettingService.LegRequest(777L, Market.BTTS, "YES", null),
+                        new BettingService.LegRequest(777L, Market.BTTS, "NO", null)),
+                // Ambos marcan y más de 1,5 goles están correlacionados.
+                List.of(new BettingService.LegRequest(777L, Market.BTTS, "YES", null),
+                        new BettingService.LegRequest(777L, Market.GOALS, "OVER", 1.5)));
 
         for (List<BettingService.LegRequest> pair : sameMatchPairs) {
             IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                     () -> service.placeParlay(userId, 5_000, pair));
-            assertEquals("No se pueden combinar dos selecciones del mismo partido", error.getMessage());
+            assertTrue(error.getMessage().startsWith("No se pueden combinar selecciones incompatibles del mismo partido"));
             // Tampoco con una tercera selección válida de otro partido.
             List<BettingService.LegRequest> withThird = new java.util.ArrayList<>(pair);
             withThird.add(other);
